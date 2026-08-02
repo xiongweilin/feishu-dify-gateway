@@ -58,13 +58,12 @@ class Settings:
     @classmethod
     def from_environment(cls) -> Settings:
         secrets_dir = Path(os.getenv("GATEWAY_SECRETS_DIR", "/run/secrets"))
+        user_open_id = _read_secret(secrets_dir, "feishu_user_open_id")
         return cls(
             feishu_app_id=_read_secret(secrets_dir, "feishu_app_id"),
             feishu_app_secret=_read_secret(secrets_dir, "feishu_app_secret"),
-            feishu_allowed_open_id=_read_secret(secrets_dir, "feishu_allowed_open_id"),
-            feishu_alert_recipient_open_id=_read_secret(
-                secrets_dir, "feishu_alert_recipient_open_id"
-            ),
+            feishu_allowed_open_id=user_open_id,
+            feishu_alert_recipient_open_id=user_open_id,
             dify_api_key=_read_secret(secrets_dir, "dify_api_key"),
             user_hmac_key=_read_secret(secrets_dir, "user_hmac_key"),
             notification_hmac_key=_read_secret(secrets_dir, "notification_hmac_key"),
