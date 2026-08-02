@@ -81,13 +81,15 @@ def send_mail(secret_dir: Path, subject: str, body: str) -> None:
     username = read_secret(secret_dir, "smtp_username")
     password = read_secret(secret_dir, "smtp_app_password")
     recipient = read_secret(secret_dir, "smtp_recipient")
+    host = os.getenv("WATCHDOG_SMTP_HOST", "smtp.qq.com")
+    port = int(os.getenv("WATCHDOG_SMTP_PORT", "587"))
     message = EmailMessage()
     message["From"] = username
     message["To"] = recipient
     message["Subject"] = subject
     message.set_content(body)
     context = ssl.create_default_context()
-    with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as client:
+    with smtplib.SMTP(host, port, timeout=15) as client:
         client.starttls(context=context)
         client.login(username, password)
         client.send_message(message)
