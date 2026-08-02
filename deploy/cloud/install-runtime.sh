@@ -30,6 +30,7 @@ fi
 
 export UV_PYTHON_INSTALL_DIR=$repo/.python
 export UV_CACHE_DIR=$repo/uv-cache
+cd "$repo"
 "$uv_bin" sync --frozen --no-dev --python 3.12
 "$repo/.venv/bin/python" -c \
   'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)'
