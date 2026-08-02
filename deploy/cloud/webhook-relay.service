@@ -1,0 +1,22 @@
+[Unit]
+Description=Durable infrastructure webhook relay to Feishu gateway
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/srv/feishu-dify-gateway
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/feishu-relay/config
+ExecStart=/usr/bin/python3 /srv/feishu-dify-gateway/cloud/relay.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/webhook-relay/queue
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=Out-of-band Feishu gateway watchdog
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/srv/feishu-dify-gateway
+EnvironmentFile=-/etc/feishu-gateway-watchdog/config
+ExecStart=/usr/bin/python3 /srv/feishu-dify-gateway/cloud/watchdog.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/feishu-gateway-watchdog

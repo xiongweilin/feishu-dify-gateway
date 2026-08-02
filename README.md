@@ -1,0 +1,57 @@
+# Feishu–Dify Gateway
+
+个人飞书应用机器人的私有网关。它承担三类职责：
+
+- 通过飞书长连接接收本人单聊消息，并转发给专用 Dify Chatflow；
+- 接收 Alertmanager 和基础设施通知，投递到本人飞书私聊；
+- 输出健康、就绪和 Prometheus 指标，不记录消息正文、凭证或原始用户标识。
+
+## 边界
+
+- 仅允许一个配置的飞书 `open_id`。
+- 只支持文本及 `/help`、`/new`、`/status`、`/alerts` 四个只读命令。
+- `/v1/notifications` 必须使用时间戳、事件 ID 和 HMAC-SHA256 签名。
+- `/v1/alerts/alertmanager` 只通过 Docker `shared-net` 使用。
+- Dify 和飞书响应一律按不可信外部输入校验。
+- 幂等库只保存事件 ID、状态、时间和会话 ID，不保存消息正文。
+
+## 开发
+
+```powershell
+uv sync
+uv run pytest
+uv run ruff check .
+uv run mypy
+```
+
+## 运行配置
+
+Compose 从 `/srv/secrets/feishu-dify-gateway` 挂载以下文件：
+
+| 文件 | 用途 |
+|---|---|
+| `feishu_app_id` | 飞书应用 App ID |
+| `feishu_app_secret` | 飞书应用 App Secret |
+| `feishu_allowed_open_id` | 唯一允许交互的用户 |
+| `feishu_alert_recipient_open_id` | 告警接收用户 |
+| `dify_api_key` | 专用 Chatflow API Key |
+| `user_hmac_key` | 对飞书用户标识做不可逆映射 |
+| `notification_hmac_key` | 云端 relay 与 Windows helper 的请求签名 |
+
+所有文件必须为 `600`，目录必须为 `700`，且不得进入 Git、Docker 环境变量、日志或文档。实际凭证由用户在目标主机交互录入；不要通过聊天或命令输出传递。
+
+## 内部接口
+
+- `POST /v1/alerts/alertmanager`
+- `POST /v1/notifications`
+- `GET /healthz`
+- `GET /readyz`
+- `GET /metrics`
+
+错误统一为：
+
+```json
+{"error":{"code":"ERROR_CODE","message":"Safe explanation"}}
+```
+
+详细决策见 [ADR-001](docs/decisions/0001-use-feishu-long-connection-and-dify.md)。
