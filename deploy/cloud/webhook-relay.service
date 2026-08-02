@@ -8,15 +8,18 @@ Type=simple
 User=root
 WorkingDirectory=/srv/feishu-dify-gateway
 Environment=PYTHONUNBUFFERED=1
+Environment=RELAY_QUEUE_DIR=/var/lib/feishu-webhook-relay/queue
 EnvironmentFile=-/etc/feishu-relay/config
-ExecStart=/usr/bin/python3 /srv/feishu-dify-gateway/cloud/relay.py
+ExecStart=/srv/feishu-dify-gateway/.venv/bin/python /srv/feishu-dify-gateway/cloud/relay.py
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/srv/webhook-relay/queue
+StateDirectory=feishu-webhook-relay
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/feishu-webhook-relay
 
 [Install]
 WantedBy=multi-user.target

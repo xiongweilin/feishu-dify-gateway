@@ -15,10 +15,14 @@ from feishu_dify_gateway.store import StateStore
 class FakeSender:
     def __init__(self) -> None:
         self.messages: list[tuple[str, str]] = []
+        self.idempotency_keys: list[str] = []
         self.is_ready = True
         self.failure: Exception | None = None
 
-    async def send_text(self, recipient_open_id: str, text: str) -> None:
+    async def send_text(
+        self, recipient_open_id: str, text: str, idempotency_key: str
+    ) -> None:
+        self.idempotency_keys.append(idempotency_key)
         if self.failure is not None:
             raise self.failure
         self.messages.append((recipient_open_id, text))

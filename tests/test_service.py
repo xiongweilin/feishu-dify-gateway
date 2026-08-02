@@ -33,6 +33,7 @@ async def test_notification_is_delivered_once(
     assert first.accepted == 1
     assert second.deduplicated == 1
     assert len(sender.messages) == 1
+    assert len(sender.idempotency_keys) == 1
 
 
 async def test_delivery_failure_releases_claim(
@@ -52,6 +53,26 @@ async def test_delivery_failure_releases_claim(
     sender.failure = None
     result = await gateway.deliver_notification("event-2", notification)
     assert result.accepted == 1
+
+
+async def test_retry_uses_the_same_feishu_idempotency_key(
+    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus],
+) -> None:
+    gateway, sender, _, _ = service
+    notification = Notification(
+        source="test",
+        severity="info",
+        title="title",
+        text="text",
+        occurredAt=datetime.now(UTC),
+    )
+    sender.failure = GatewayError("FEISHU_SEND_FAILED", "safe")
+    with pytest.raises(GatewayError):
+        await gateway.deliver_notification("stable-event", notification)
+    sender.failure = None
+    await gateway.deliver_notification("stable-event", notification)
+    assert len(sender.idempotency_keys) == 2
+    assert sender.idempotency_keys[0] == sender.idempotency_keys[1]
 
 
 async def test_alertmanager_deduplicates_per_alert(

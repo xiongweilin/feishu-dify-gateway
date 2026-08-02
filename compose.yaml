@@ -13,10 +13,11 @@ services:
     tmpfs:
       - /tmp:size=16m,mode=1777
     ports:
-      - "127.0.0.1:18082:8082"
+      - "127.0.0.1:18082:8083"
     environment:
       GATEWAY_SECRETS_DIR: /run/secrets
       GATEWAY_STATE_DB: /var/lib/feishu-gateway/state.db
+      GATEWAY_PUBLIC_PORT: "8083"
       DIFY_BASE_URL: http://docker-api-1:5001/v1
       DIFY_HEALTH_URL: http://docker-api-1:5001/health
       PROMETHEUS_BASE_URL: http://prometheus:9090

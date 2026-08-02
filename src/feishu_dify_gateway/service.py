@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import logging
 import time
+import uuid
 from collections.abc import Awaitable
 from typing import Protocol
 
@@ -18,10 +19,13 @@ from .security import pseudonymous_user
 from .store import StateStore
 
 logger = logging.getLogger(__name__)
+FEISHU_DELIVERY_NAMESPACE = uuid.UUID("589e9076-153c-40de-8751-b2469ea1af41")
 
 
 class Sender(Protocol):
-    async def send_text(self, recipient_open_id: str, text: str) -> None: ...
+    async def send_text(
+        self, recipient_open_id: str, text: str, idempotency_key: str
+    ) -> None: ...
 
     async def ready(self) -> bool: ...
 
@@ -99,12 +103,15 @@ class GatewayService:
             PrometheusClient(settings.prometheus_base_url),
         )
 
-    async def _send_chunks(self, recipient: str, text: str) -> None:
+    async def _send_chunks(self, recipient: str, text: str, delivery_key: str) -> None:
         chunks = split_text(text)
         if not chunks:
             raise GatewayError("EMPTY_MESSAGE", "Message is empty", 422)
-        for chunk in chunks:
-            await self.sender.send_text(recipient, chunk)
+        for index, chunk in enumerate(chunks):
+            idempotency_key = str(
+                uuid.uuid5(FEISHU_DELIVERY_NAMESPACE, f"{delivery_key}:{index}")
+            )
+            await self.sender.send_text(recipient, chunk, idempotency_key)
 
     async def deliver_notification(
         self, event_id: str, notification: Notification
@@ -117,7 +124,9 @@ class GatewayService:
         if notification.url is not None:
             message += f"\n{notification.url}"
         try:
-            await self._send_chunks(self.settings.feishu_alert_recipient_open_id, message)
+            await self._send_chunks(
+                self.settings.feishu_alert_recipient_open_id, message, key
+            )
         except Exception:
             self.store.release_event(key)
             self.metrics.deliveries.labels(notification.source, "error").inc()
@@ -146,7 +155,9 @@ class GatewayService:
                 continue
             try:
                 await self._send_chunks(
-                    self.settings.feishu_alert_recipient_open_id, self._format_alert(alert)
+                    self.settings.feishu_alert_recipient_open_id,
+                    self._format_alert(alert),
+                    key,
                 )
             except Exception:
                 self.store.release_event(key)
@@ -198,7 +209,7 @@ class GatewayService:
         user_hash = pseudonymous_user(self.settings.user_hmac_key, open_id)
         try:
             reply = await self._command_or_chat(text, user_hash)
-            await self._send_chunks(open_id, reply)
+            await self._send_chunks(open_id, reply, key)
         except Exception:
             self.store.release_event(key)
             self.metrics.deliveries.labels("feishu-chat", "error").inc()
@@ -249,6 +260,11 @@ class GatewayService:
             feishu_check, dify_check, prometheus_check
         )
         return feishu_ok, dify_ok, prometheus_ok
+
+    async def core_readiness(self) -> tuple[bool, bool]:
+        import asyncio
+
+        return await asyncio.gather(self.sender.ready(), self.dify.ready())
 
     async def close(self) -> None:
         await self.sender.close()

@@ -86,7 +86,7 @@ def normalize_event(path: str, headers: Any, body: bytes) -> tuple[str, dict[str
         raise ValueError("Webhook body must be a JSON object")
 
     occurred_at = datetime.now(UTC).isoformat()
-    if "github" in path:
+    if path == "/webhooks/github":
         source = "github"
         event = _string(headers.get("X-GitHub-Event"), 64) or "unknown"
         delivery = _string(headers.get("X-GitHub-Delivery"), 200)
@@ -107,7 +107,7 @@ def normalize_event(path: str, headers: Any, body: bytes) -> tuple[str, dict[str
             "text": (detail or "GitHub webhook received")[:10_000],
             "occurredAt": occurred_at,
         }
-    elif "sonar" in path:
+    elif path == "/webhooks/sonar":
         source = "sonar"
         project = data.get("project") if isinstance(data.get("project"), dict) else {}
         quality_gate = data.get("qualityGate") if isinstance(data.get("qualityGate"), dict) else {}

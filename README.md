@@ -38,7 +38,7 @@ Compose 从 `/srv/secrets/feishu-dify-gateway` 挂载以下文件：
 | `user_hmac_key` | 对飞书用户标识做不可逆映射 |
 | `notification_hmac_key` | 云端 relay 与 Windows helper 的请求签名 |
 
-所有文件必须为 `600`，目录必须为 `700`，且不得进入 Git、Docker 环境变量、日志或文档。实际凭证由用户在目标主机交互录入；不要通过聊天或命令输出传递。
+所有文件必须为 `600`，目录必须为 `700`，并归属容器内专用 UID/GID `10001`；状态目录使用同一归属。凭证不得进入 Git、Docker 环境变量、日志或文档。实际凭证由用户在目标主机通过 `sudo deploy/wsl/install-gateway-secrets.sh` 交互录入；不要通过聊天或命令输出传递。
 
 ## 内部接口
 
@@ -47,6 +47,8 @@ Compose 从 `/srv/secrets/feishu-dify-gateway` 挂载以下文件：
 - `GET /healthz`
 - `GET /readyz`
 - `GET /metrics`
+
+容器内 `8082` 是只在 `shared-net` 使用的内部接口；宿主机 `127.0.0.1:18082` 只映射到受限的 `8083` 监听，后者会隐藏 Alertmanager 路由。
 
 错误统一为：
 
