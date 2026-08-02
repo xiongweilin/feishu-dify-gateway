@@ -23,7 +23,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$credentialName = 'Codex:Metratio:FeishuGatewayHmac'
+$credentialName = 'Agent:Metratio:FeishuGatewayHmac'
 
 if (-not ('FeishuNotify.NativeMethods' -as [type])) {
     Add-Type -TypeDefinition @'
