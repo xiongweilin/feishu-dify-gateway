@@ -56,7 +56,6 @@ def transition(state: WatchdogState, ready: bool, now: int) -> str:
         state.failures = 0
         state.first_failure_at = 0
         state.notified = False
-        state.last_notice_at = 0
         return action
     state.failures += 1
     if not state.first_failure_at:
@@ -113,11 +112,13 @@ def main() -> None:
         state.notified = True
         state.last_notice_at = now
     elif action == "recovery":
-        send_mail(
-            secret_dir,
-            "Metratio message gateway recovered",
-            "The Feishu message gateway is ready again.",
-        )
+        if now - state.last_notice_at >= 21_600:
+            send_mail(
+                secret_dir,
+                "Metratio message gateway recovered",
+                "The Feishu message gateway is ready again.",
+            )
+            state.last_notice_at = now
     save_state(state_path, state)
 
 
