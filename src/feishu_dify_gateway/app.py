@@ -86,6 +86,12 @@ def create_app(
             request_id = ""
         request_id = request_id or uuid.uuid4().hex
         started = time.perf_counter()
+        server = request.scope.get("server")
+        local_port = server[1] if isinstance(server, tuple) and len(server) == 2 else None
+        if request.url.path == "/v1/alerts/alertmanager" and local_port != settings.port:
+            blocked_response = error_response("NOT_FOUND", "Resource not found", 404)
+            blocked_response.headers["X-Request-ID"] = request_id
+            return blocked_response
         try:
             response = await call_next(request)
         except Exception:
@@ -133,9 +139,9 @@ def create_app(
 
     @app.get("/readyz", include_in_schema=False)
     async def ready() -> Response:
-        feishu_ok, dify_ok, prometheus_ok = await gateway.readiness()
+        feishu_ok, dify_ok = await gateway.core_readiness()
         connection_ok = not enable_ws or (connection is not None and connection.running)
-        if feishu_ok and dify_ok and prometheus_ok and connection_ok:
+        if feishu_ok and dify_ok and connection_ok:
             return JSONResponse({"status": "ready"})
         return error_response("NOT_READY", "One or more dependencies are unavailable", 503)
 

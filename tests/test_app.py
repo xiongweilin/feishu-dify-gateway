@@ -27,6 +27,31 @@ def test_health_and_metrics(
         assert "feishu_gateway_http_requests_total" in metrics.text
 
 
+def test_ready_does_not_depend_on_prometheus(
+    settings: Settings,
+    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus],
+) -> None:
+    gateway, _, _, prometheus = service
+    prometheus.is_ready = False
+    app = create_app(settings, service=gateway, start_long_connection=False)
+    with TestClient(app) as client:
+        assert client.get("/readyz").status_code == 200
+
+
+def test_alertmanager_route_is_hidden_on_public_listener(
+    settings: Settings,
+    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus],
+) -> None:
+    gateway, _, _, _ = service
+    app = create_app(settings, service=gateway, start_long_connection=False)
+    with TestClient(app, base_url=f"http://testserver:{settings.public_port}") as client:
+        response = client.post("/v1/alerts/alertmanager", json={})
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": {"code": "NOT_FOUND", "message": "Resource not found"}
+    }
+
+
 def test_signed_notification_and_replay(
     settings: Settings,
     service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus],

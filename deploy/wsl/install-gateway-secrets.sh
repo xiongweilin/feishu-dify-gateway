@@ -2,7 +2,16 @@
 set -euo pipefail
 
 target_dir=/srv/secrets/feishu-dify-gateway
-install -d -m 700 "$target_dir"
+state_dir=/srv/data/feishu-dify-gateway
+gateway_uid=10001
+gateway_gid=10001
+
+if [[ $EUID -ne 0 ]]; then
+  printf 'Run this script with sudo so ownership can be set for the container user.\n' >&2
+  exit 1
+fi
+
+install -d -o "$gateway_uid" -g "$gateway_gid" -m 700 "$target_dir" "$state_dir"
 
 write_value() {
   local name=$1
@@ -28,4 +37,5 @@ write_value user_hmac_key 'User pseudonym HMAC key'
 write_value notification_hmac_key 'Shared notification HMAC key'
 
 chmod 600 "$target_dir"/*
+chown "$gateway_uid:$gateway_gid" "$target_dir"/*
 printf 'Gateway secret files installed. No value was displayed.\n'

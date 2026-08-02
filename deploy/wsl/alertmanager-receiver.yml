@@ -1,0 +1,8 @@
+route:
+  receiver: feishu-gateway
+
+receivers:
+  - name: feishu-gateway
+    webhook_configs:
+      - url: http://feishu-dify-gateway:8082/v1/alerts/alertmanager
+        send_resolved: true

@@ -62,8 +62,9 @@ def transition(state: WatchdogState, ready: bool, now: int) -> str:
     if not state.first_failure_at:
         state.first_failure_at = now
     old_enough = now - state.first_failure_at >= 300
+    threshold_reached = state.failures >= 3 or old_enough
     reminder_due = not state.notified or now - state.last_notice_at >= 21_600
-    if state.failures >= 3 and old_enough and reminder_due:
+    if threshold_reached and reminder_due:
         return "failure"
     return "none"
 

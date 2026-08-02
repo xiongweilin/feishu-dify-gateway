@@ -50,6 +50,7 @@ class Settings:
     feishu_base_url: str = "https://open.feishu.cn"
     host: str = "0.0.0.0"
     port: int = 8082
+    public_port: int = 8083
     ws_enabled: bool = True
     notification_ttl_seconds: int = 300
     event_retention_seconds: int = 604_800
@@ -74,5 +75,6 @@ class Settings:
             feishu_base_url=os.getenv("FEISHU_BASE_URL", "https://open.feishu.cn"),
             host=os.getenv("GATEWAY_HOST", "0.0.0.0"),
             port=int(os.getenv("GATEWAY_PORT", "8082")),
+            public_port=int(os.getenv("GATEWAY_PUBLIC_PORT", "8083")),
             ws_enabled=_env_bool("FEISHU_WS_ENABLED", True),
         )

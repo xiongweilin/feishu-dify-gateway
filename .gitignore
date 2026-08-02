@@ -1,4 +1,7 @@
 .venv/
+.python/
+.tools/
+uv-cache/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
@@ -12,3 +15,4 @@ dist/
 build/
 .env
 secrets/
+runtime/

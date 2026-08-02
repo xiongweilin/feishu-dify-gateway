@@ -3,6 +3,12 @@ set -euo pipefail
 
 relay_dir=/etc/feishu-relay
 watchdog_dir=/etc/feishu-gateway-watchdog
+
+if [[ $EUID -ne 0 ]]; then
+  printf 'Run this script with sudo.\n' >&2
+  exit 1
+fi
+
 install -d -m 700 "$relay_dir" "$watchdog_dir"
 
 write_value() {
