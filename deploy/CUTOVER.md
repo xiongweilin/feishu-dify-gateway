@@ -6,7 +6,7 @@
 
 1. 飞书应用仅本人可见，启用机器人和长连接事件订阅，只授予单聊消息读取、发送所需权限。
 2. 发布专用 Dify Chatflow 并创建独立 API Key。
-3. 在 WSL 交互执行 `sudo deploy/wsl/install-gateway-secrets.sh`；只检查 secret 文件存在、权限 `600`、UID/GID `10001`，不输出值。
+3. 在 WSL 交互执行 `sudo deploy/wsl/install-gateway-secrets.sh`，再执行 `deploy/wsl/capture-open-id.sh` 并向机器人发送一条私聊；工具把 ID 直接写入一个 `600` secret 文件，不显示其值或正文。
 4. 在云端先以仓库所有者执行 `deploy/cloud/install-runtime.sh`，再交互执行 `sudo deploy/cloud/install-cloud-secrets.sh`；Windows 交互执行 `deploy/windows/set-feishu-gateway-credential.ps1`。
 5. 保存当前容器、Alertmanager、Prometheus、Tailscale Serve、云端 relay 和 Windows 任务的最小基线。
 

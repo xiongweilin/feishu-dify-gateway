@@ -32,8 +32,7 @@ Compose 从 `/srv/secrets/feishu-dify-gateway` 挂载以下文件：
 |---|---|
 | `feishu_app_id` | 飞书应用 App ID |
 | `feishu_app_secret` | 飞书应用 App Secret |
-| `feishu_allowed_open_id` | 唯一允许交互的用户 |
-| `feishu_alert_recipient_open_id` | 告警接收用户 |
+| `feishu_user_open_id` | 唯一允许交互且接收告警的用户；由一次性捕获工具直接写入 |
 | `dify_api_key` | 专用 Chatflow API Key |
 | `user_hmac_key` | 对飞书用户标识做不可逆映射 |
 | `notification_hmac_key` | 云端 relay 与 Windows helper 的请求签名 |
