@@ -21,7 +21,7 @@ class ErrorResponse(BaseModel):
 class Notification(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    source: Literal["github", "sonar", "windows-maintenance", "watchdog", "test"]
+    source: Literal["github", "sonar", "windows-maintenance", "watchdog", "test", "control-plane"]
     severity: Literal["info", "warning", "critical"]
     title: ShortText
     text: LongText
