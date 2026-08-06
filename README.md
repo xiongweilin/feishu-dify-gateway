@@ -10,8 +10,10 @@
 
 - 仅允许一个配置的飞书 `open_id`。
 - 只支持文本及 `/help`、`/new`、`/status`、`/alerts` 四个只读命令。
+- 控制平面命令：`/cp status`、`/cp approve <id>`、`/cp reject <id>`、`/cp rollback <id>`、`/cp pause`、`/cp resume`、`/cp promote <candidate_id>`；由控制平面确认后执行，非控制平面文本仍走 Dify。
 - `/v1/notifications` 必须使用时间戳、事件 ID 和 HMAC-SHA256 签名。
 - `/v1/alerts/alertmanager` 只通过 Docker `shared-net` 使用。
+- 控制平面审批回调使用 `X-Control-Plane-Key` 共享密钥头；`CONTROL_PLANE_BASE_URL` 指向 Windows 宿主 `http://host.docker.internal:18083`。
 - Dify 和飞书响应一律按不可信外部输入校验。
 - 幂等库只保存事件 ID、状态、时间和会话 ID，不保存消息正文。
 
@@ -36,6 +38,7 @@ Compose 从 `/srv/secrets/feishu-dify-gateway` 挂载以下文件：
 | `dify_api_key` | 专用 Chatflow API Key |
 | `user_hmac_key` | 对飞书用户标识做不可逆映射 |
 | `notification_hmac_key` | 云端 relay 与 Windows helper 的请求签名 |
+| `control_plane_key` | 控制平面审批与状态接口的共享密钥 |
 
 所有文件必须为 `600`，目录必须为 `700`，并归属容器内专用 UID/GID `10001`；状态目录使用同一归属。凭证不得进入 Git、Docker 环境变量、日志或文档。实际凭证由用户在目标主机通过 `sudo deploy/wsl/install-gateway-secrets.sh` 交互录入；不要通过聊天或命令输出传递。
 

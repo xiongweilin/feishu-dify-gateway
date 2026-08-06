@@ -21,6 +21,7 @@ services:
       DIFY_BASE_URL: http://docker-api-1:5001/v1
       DIFY_HEALTH_URL: http://docker-api-1:5001/health
       PROMETHEUS_BASE_URL: http://prometheus:9090
+      CONTROL_PLANE_BASE_URL: http://host.docker.internal:18083
       FEISHU_WS_ENABLED: "true"
     volumes:
       - /srv/secrets/feishu-dify-gateway:/run/secrets:ro

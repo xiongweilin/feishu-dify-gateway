@@ -75,18 +75,32 @@ def settings(tmp_path: Path) -> Settings:
         dify_api_key="dify-key",
         user_hmac_key="user-key",
         notification_hmac_key="notify-key",
+        control_plane_key="cp-key",
         state_db=tmp_path / "state.db",
         ws_enabled=False,
     )
 
 
+class FakeControlPlane:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, dict | None]] = []
+
+    async def request(self, method: str, path: str, body: dict | None = None) -> str:
+        self.calls.append((method, path, body))
+        return f"control-plane:{method} {path}"
+
+    async def close(self) -> None:
+        return None
+
+
 @pytest.fixture
 async def service(
     settings: Settings,
-) -> AsyncIterator[tuple[GatewayService, FakeSender, FakeDify, FakePrometheus]]:
+) -> AsyncIterator[tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane]]:
     sender = FakeSender()
     dify = FakeDify()
     prometheus = FakePrometheus()
+    control_plane = FakeControlPlane()
     gateway = GatewayService(
         settings,
         StateStore(settings.state_db),
@@ -94,6 +108,7 @@ async def service(
         sender,
         dify,
         prometheus,
+        control_plane,
     )
-    yield gateway, sender, dify, prometheus
+    yield gateway, sender, dify, prometheus, control_plane
     await gateway.close()

@@ -8,6 +8,8 @@ import uuid
 from collections.abc import Awaitable
 from typing import Protocol
 
+import httpx
+
 from .config import Settings
 from .dify import DifyClient
 from .errors import GatewayError
@@ -20,6 +22,41 @@ from .store import StateStore
 
 logger = logging.getLogger(__name__)
 FEISHU_DELIVERY_NAMESPACE = uuid.UUID("589e9076-153c-40de-8751-b2469ea1af41")
+
+
+class ControlPlaneClient:
+    """Minimal signed-adjacent client for the control plane API (shared key header)."""
+
+    def __init__(self, base_url: str, api_key: str) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self._http = httpx.AsyncClient(timeout=20)
+
+    async def request(self, method: str, path: str, body: dict[str, object] | None = None) -> str:
+        headers = {
+            "X-Control-Plane-Key": self.api_key,
+            "Accept": "application/json",
+        }
+        try:
+            response = await self._http.request(
+                method, f"{self.base_url}{path}", json=body, headers=headers
+            )
+        except httpx.HTTPError as exc:
+            return f"控制平面不可达：{exc}"
+        if response.status_code >= 400:
+            return f"控制平面错误 HTTP {response.status_code}: {response.text[:500]}"
+        try:
+            data = response.json()
+        except ValueError:
+            return response.text[:1_000]
+        if isinstance(data, dict) and data.get("accepted") is False:
+            return f"控制平面拒绝：{data.get('message', '')}"
+        if isinstance(data, dict) and data.get("message"):
+            return f"控制平面：{data['message']}"
+        return str(data)[:1_000]
+
+    async def close(self) -> None:
+        await self._http.aclose()
 
 
 class Sender(Protocol):
@@ -74,6 +111,7 @@ class GatewayService:
         sender: Sender,
         dify: ChatClient,
         prometheus: MonitorClient,
+        control_plane: ControlPlaneClient | None = None,
     ) -> None:
         self.settings = settings
         self.store = store
@@ -81,6 +119,10 @@ class GatewayService:
         self.sender = sender
         self.dify = dify
         self.prometheus = prometheus
+        self.control_plane = control_plane or ControlPlaneClient(
+            settings.control_plane_base_url,
+            settings.control_plane_key,
+        )
 
     @classmethod
     def build(cls, settings: Settings, store: StateStore, metrics: Metrics) -> GatewayService:
@@ -226,7 +268,14 @@ class GatewayService:
                 "/help 查看帮助\n"
                 "/new 开始新会话\n"
                 "/status 查看只读健康状态\n"
-                "/alerts 查看当前告警"
+                "/alerts 查看当前告警\n"
+                "/cp status 控制平面状态\n"
+                "/cp approve <id> 批准修复\n"
+                "/cp reject <id> 拒绝修复\n"
+                "/cp rollback <id> 回滚修复\n"
+                "/cp pause 暂停控制平面\n"
+                "/cp resume 恢复控制平面\n"
+                "/cp promote <candidate_id> 晋升候选经验"
             )
         if command == "/new":
             self.store.clear_conversation(user_hash)
@@ -245,10 +294,44 @@ class GatewayService:
                 return "当前没有可见的 active alert。"
             lines = [f"- {name}: {state}" for name, state in alerts]
             return "当前告警：\n" + "\n".join(lines)
+        if command.startswith("/cp "):
+            return await self._control_plane_command(text[4:].strip())
         conversation_id = self.store.conversation_for(user_hash)
         response = await self.dify.chat(text, user_hash, conversation_id)
         self.store.set_conversation(user_hash, response.conversation_id)
         return response.answer
+
+    async def _control_plane_command(self, text: str) -> str:
+        parts = text.split(maxsplit=1)
+        action = parts[0].lower() if parts else ""
+        arg = parts[1].strip() if len(parts) > 1 else ""
+        if action == "status":
+            return await self.control_plane.request("GET", "/status")
+        if action in {"approve", "reject", "rollback"} and arg:
+            return await self.control_plane.request(
+                "POST",
+                f"/v1/approvals/{arg}/decision",
+                {"action": action, "decided_by": "feishu", "note": ""},
+            )
+        if action in {"pause", "resume"}:
+            return await self.control_plane.request(
+                "POST",
+                f"/v1/control/{action}",
+                {"reason": "feishu"},
+            )
+        if action == "promote" and arg:
+            return await self.control_plane.request(
+                "POST",
+                f"/v1/candidates/{arg}/promote",
+                {"decided_by": "feishu", "note": ""},
+            )
+        return (
+            "用法：\n"
+            "/cp status\n"
+            "/cp approve <id> | reject <id> | rollback <id>\n"
+            "/cp pause | resume\n"
+            "/cp promote <candidate_id>"
+        )
 
     async def readiness(self) -> tuple[bool, bool, bool]:
         feishu_check: Awaitable[bool] = self.sender.ready()
@@ -270,4 +353,5 @@ class GatewayService:
         await self.sender.close()
         await self.dify.close()
         await self.prometheus.close()
+        await self.control_plane.close()
         self.store.close()
