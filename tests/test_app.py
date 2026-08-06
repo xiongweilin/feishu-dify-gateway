@@ -10,14 +10,14 @@ from feishu_dify_gateway.config import Settings
 from feishu_dify_gateway.security import sign_request
 from feishu_dify_gateway.service import GatewayService
 
-from .conftest import FakeDify, FakePrometheus, FakeSender
+from .conftest import FakeControlPlane, FakeDify, FakePrometheus, FakeSender
 
 
 def test_health_and_metrics(
     settings: Settings,
-    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus],
+    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane],
 ) -> None:
-    gateway, _, _, _ = service
+    gateway, _, _, _, _ = service
     app = create_app(settings, service=gateway, start_long_connection=False)
     with TestClient(app) as client:
         assert client.get("/healthz").status_code == 200
@@ -29,9 +29,9 @@ def test_health_and_metrics(
 
 def test_ready_does_not_depend_on_prometheus(
     settings: Settings,
-    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus],
+    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane],
 ) -> None:
-    gateway, _, _, prometheus = service
+    gateway, _, _, prometheus, _ = service
     prometheus.is_ready = False
     app = create_app(settings, service=gateway, start_long_connection=False)
     with TestClient(app) as client:
@@ -40,9 +40,9 @@ def test_ready_does_not_depend_on_prometheus(
 
 def test_alertmanager_route_is_hidden_on_public_listener(
     settings: Settings,
-    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus],
+    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane],
 ) -> None:
-    gateway, _, _, _ = service
+    gateway, _, _, _, _ = service
     app = create_app(settings, service=gateway, start_long_connection=False)
     with TestClient(app, base_url=f"http://testserver:{settings.public_port}") as client:
         response = client.post("/v1/alerts/alertmanager", json={})
@@ -54,9 +54,9 @@ def test_alertmanager_route_is_hidden_on_public_listener(
 
 def test_signed_notification_and_replay(
     settings: Settings,
-    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus],
+    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane],
 ) -> None:
-    gateway, sender, _, _ = service
+    gateway, sender, _, _, _ = service
     app = create_app(settings, service=gateway, start_long_connection=False)
     body = json.dumps(
         {
@@ -85,9 +85,9 @@ def test_signed_notification_and_replay(
 
 def test_invalid_signature_is_safe(
     settings: Settings,
-    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus],
+    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane],
 ) -> None:
-    gateway, sender, _, _ = service
+    gateway, sender, _, _, _ = service
     app = create_app(settings, service=gateway, start_long_connection=False)
     with TestClient(app) as client:
         response = client.post(

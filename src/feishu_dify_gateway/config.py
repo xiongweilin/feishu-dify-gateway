@@ -43,10 +43,12 @@ class Settings:
     dify_api_key: str
     user_hmac_key: str
     notification_hmac_key: str
+    control_plane_key: str
     state_db: Path
     dify_base_url: str = "http://docker-api-1:5001/v1"
     dify_health_url: str = "http://docker-api-1:5001/health"
     prometheus_base_url: str = "http://prometheus:9090"
+    control_plane_base_url: str = "http://host.docker.internal:18083"
     feishu_base_url: str = "https://open.feishu.cn"
     host: str = "0.0.0.0"
     port: int = 8082
@@ -67,10 +69,14 @@ class Settings:
             dify_api_key=_read_secret(secrets_dir, "dify_api_key"),
             user_hmac_key=_read_secret(secrets_dir, "user_hmac_key"),
             notification_hmac_key=_read_secret(secrets_dir, "notification_hmac_key"),
+            control_plane_key=_read_secret(secrets_dir, "control_plane_key"),
             state_db=Path(os.getenv("GATEWAY_STATE_DB", "/var/lib/feishu-gateway/state.db")),
             dify_base_url=os.getenv("DIFY_BASE_URL", "http://docker-api-1:5001/v1"),
             dify_health_url=os.getenv("DIFY_HEALTH_URL", "http://docker-api-1:5001/health"),
             prometheus_base_url=os.getenv("PROMETHEUS_BASE_URL", "http://prometheus:9090"),
+            control_plane_base_url=os.getenv(
+                "CONTROL_PLANE_BASE_URL", "http://host.docker.internal:18083"
+            ),
             feishu_base_url=os.getenv("FEISHU_BASE_URL", "https://open.feishu.cn"),
             host=os.getenv("GATEWAY_HOST", "0.0.0.0"),
             port=int(os.getenv("GATEWAY_PORT", "8082")),
