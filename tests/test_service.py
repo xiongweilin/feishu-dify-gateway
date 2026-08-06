@@ -55,6 +55,22 @@ async def test_delivery_failure_releases_claim(
     assert result.accepted == 1
 
 
+async def test_control_plane_notification_source_is_accepted(
+    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane],
+) -> None:
+    gateway, sender, _, _, _ = service
+    notification = Notification(
+        source="control-plane",
+        severity="warning",
+        title="待审批",
+        text="repair-id",
+        occurredAt=datetime.now(UTC),
+    )
+    result = await gateway.deliver_notification("cp-event-1", notification)
+    assert result.accepted == 1
+    assert "待审批" in sender.messages[0][1]
+
+
 async def test_retry_uses_the_same_feishu_idempotency_key(
     service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane],
 ) -> None:
