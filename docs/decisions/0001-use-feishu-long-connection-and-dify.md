@@ -2,7 +2,7 @@
 
 ## 状态
 
-Accepted
+Superseded by ADR-002（2026-08-07：改用控制平面 Codex 派发，移除 Dify Chatflow）
 
 ## 日期
 
