@@ -30,6 +30,6 @@ Superseded by ADR-002（2026-08-07：改用控制平面 Codex 派发，移除 Di
 ## 后果
 
 - WSL 主机离线时无法进行对话，但云端 relay 会保留通知并重试。
-- 飞书或 gateway 故障由云端 watchdog 通过 Gmail 发出带外通知。
+- 飞书或 gateway 故障由云端 watchdog 通过 QQ SMTP 发出带外通知。
 - 凭证分布在 WSL 与云端两个最小权限 secret 目录中；灾备副本进入既有密码库。
 - 指标和日志不得包含消息正文、Token、邮件地址或原始飞书用户标识。

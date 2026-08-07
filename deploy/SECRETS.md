@@ -8,5 +8,5 @@
 4. 在 WSL 以 `ratio` 用户运行 `sudo deploy/wsl/install-gateway-secrets.sh`（不再需要 Dify Chatflow API Key，2026-08-07 起）。
 5. 运行 `deploy/wsl/capture-open-id.sh` 并向机器人发送一条私聊；工具直接写入用户 ID，不显示其值。
 6. 在 Windows 运行 `deploy/windows/set-feishu-gateway-credential.ps1`，录入同一个通知签名 key。
-7. 在云服务器交互运行 `sudo deploy/cloud/install-cloud-secrets.sh`，录入同一个通知签名 key，以及专用 Gmail App Password。
+7. 在云服务器交互运行 `sudo deploy/cloud/install-cloud-secrets.sh`，录入同一个通知签名 key，以及 QQ 邮箱 SMTP 授权码（云端 watchdog 带外邮件，与 Windows Credential Manager `Agent:Metratio:QqSmtp` 一致）。
 8. 只核对文件存在、权限和服务健康；不要打印任何值。
