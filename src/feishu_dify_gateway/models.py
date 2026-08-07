@@ -54,13 +54,6 @@ class AcceptedResponse(BaseModel):
     deduplicated: int
 
 
-class DifyChatResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    answer: str = Field(min_length=1)
-    conversation_id: str = Field(min_length=1, alias="conversation_id")
-
-
 class FeishuTokenResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

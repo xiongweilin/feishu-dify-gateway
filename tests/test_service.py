@@ -8,7 +8,7 @@ from feishu_dify_gateway.errors import GatewayError
 from feishu_dify_gateway.models import AlertmanagerPayload, Notification
 from feishu_dify_gateway.service import GatewayService, split_text
 
-from .conftest import FakeControlPlane, FakeDify, FakePrometheus, FakeSender
+from .conftest import FakeControlPlane, FakePrometheus, FakeSender
 
 
 def test_split_text_is_bounded() -> None:
@@ -18,9 +18,9 @@ def test_split_text_is_bounded() -> None:
 
 
 async def test_notification_is_delivered_once(
-    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane],
+    service: tuple[GatewayService, FakeSender, FakePrometheus, FakeControlPlane],
 ) -> None:
-    gateway, sender, _, _, _ = service
+    gateway, sender, _, _ = service
     notification = Notification(
         source="test",
         severity="info",
@@ -37,9 +37,9 @@ async def test_notification_is_delivered_once(
 
 
 async def test_delivery_failure_releases_claim(
-    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane],
+    service: tuple[GatewayService, FakeSender, FakePrometheus, FakeControlPlane],
 ) -> None:
-    gateway, sender, _, _, _ = service
+    gateway, sender, _, _ = service
     sender.failure = GatewayError("FEISHU_SEND_FAILED", "safe")
     notification = Notification(
         source="test",
@@ -56,9 +56,9 @@ async def test_delivery_failure_releases_claim(
 
 
 async def test_control_plane_notification_source_is_accepted(
-    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane],
+    service: tuple[GatewayService, FakeSender, FakePrometheus, FakeControlPlane],
 ) -> None:
-    gateway, sender, _, _, _ = service
+    gateway, sender, _, _ = service
     notification = Notification(
         source="control-plane",
         severity="warning",
@@ -72,9 +72,9 @@ async def test_control_plane_notification_source_is_accepted(
 
 
 async def test_retry_uses_the_same_feishu_idempotency_key(
-    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane],
+    service: tuple[GatewayService, FakeSender, FakePrometheus, FakeControlPlane],
 ) -> None:
-    gateway, sender, _, _, _ = service
+    gateway, sender, _, _ = service
     notification = Notification(
         source="test",
         severity="info",
@@ -92,9 +92,9 @@ async def test_retry_uses_the_same_feishu_idempotency_key(
 
 
 async def test_alertmanager_deduplicates_per_alert(
-    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane],
+    service: tuple[GatewayService, FakeSender, FakePrometheus, FakeControlPlane],
 ) -> None:
-    gateway, sender, _, _, _ = service
+    gateway, sender, _, _ = service
     payload = AlertmanagerPayload.model_validate(
         {
             "status": "firing",
@@ -115,44 +115,48 @@ async def test_alertmanager_deduplicates_per_alert(
     assert len(sender.messages) == 1
 
 
-async def test_chat_continues_dify_conversation(
-    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane],
+async def test_bare_message_dispatches_task(
+    service: tuple[GatewayService, FakeSender, FakePrometheus, FakeControlPlane],
 ) -> None:
-    gateway, sender, dify, _, _ = service
-    await gateway.handle_feishu_text("msg-1", "allowed-user", "hello")
-    await gateway.handle_feishu_text("msg-2", "allowed-user", "again")
-    assert dify.calls[0][2] == ""
-    assert dify.calls[1][2] == "conversation-1"
-    assert [message for _, message in sender.messages] == ["answer:hello", "answer:again"]
+    gateway, sender, _, control_plane = service
+    await gateway.handle_feishu_text("msg-1", "allowed-user", "看看磁盘剩余")
+    await gateway.handle_feishu_text("msg-2", "allowed-user", "部署服务")
+    assert control_plane.calls == [
+        ("POST", "/v1/tasks", {"prompt": "看看磁盘剩余", "repo": "", "project": ""}),
+        ("POST", "/v1/tasks", {"prompt": "部署服务", "repo": "", "project": ""}),
+    ]
+    assert [message for _, message in sender.messages] == [
+        "control-plane:POST /v1/tasks",
+        "control-plane:POST /v1/tasks",
+    ]
 
 
 async def test_unknown_sender_is_not_answered(
-    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane],
+    service: tuple[GatewayService, FakeSender, FakePrometheus, FakeControlPlane],
 ) -> None:
-    gateway, sender, dify, _, _ = service
+    gateway, sender, _, control_plane = service
     await gateway.handle_feishu_text("msg-3", "unknown-user", "secret input")
     assert not sender.messages
-    assert not dify.calls
+    assert not control_plane.calls
 
 
 async def test_read_only_commands(
-    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane],
+    service: tuple[GatewayService, FakeSender, FakePrometheus, FakeControlPlane],
 ) -> None:
-    gateway, sender, _, prometheus, _ = service
+    gateway, sender, prometheus, _ = service
     prometheus.alerts = [("ExampleAlert", "firing")]
-    for index, command in enumerate(("/help", "/new", "/status", "/alerts")):
+    for index, command in enumerate(("/help", "/status", "/alerts")):
         await gateway.handle_feishu_text(f"command-{index}", "allowed-user", command)
     replies = [message for _, message in sender.messages]
     assert "可用命令" in replies[0]
-    assert "新的 Dify 会话" in replies[1]
-    assert "Feishu: ok" in replies[2]
-    assert "ExampleAlert" in replies[3]
+    assert "Feishu: ok" in replies[1]
+    assert "ExampleAlert" in replies[2]
 
 
 async def test_control_plane_commands_route_to_client(
-    service: tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane],
+    service: tuple[GatewayService, FakeSender, FakePrometheus, FakeControlPlane],
 ) -> None:
-    gateway, _, _, _, control_plane = service
+    gateway, _, _, control_plane = service
     commands = (
         "/cp status",
         "/cp approve repair-1",
@@ -161,6 +165,12 @@ async def test_control_plane_commands_route_to_client(
         "/cp pause",
         "/cp resume",
         "/cp promote cand-1",
+        "/cp policy fp-abc auto",
+        "/cp policy fp-abc manual",
+        "/cp run fp-abc",
+        "/cp ignore fp-abc",
+        "/cp evidence",
+        "/task 帮我看看磁盘",
     )
     for index, command in enumerate(commands):
         await gateway.handle_feishu_text(f"cp-{index}", "allowed-user", command)
@@ -179,4 +189,32 @@ async def test_control_plane_commands_route_to_client(
         "POST",
         "/v1/candidates/cand-1/promote",
         {"decided_by": "feishu", "note": ""},
+    )
+    assert calls[7] == (
+        "POST",
+        "/v1/alerts/fp-abc/policy",
+        {"policy": "auto", "note": "feishu"},
+    )
+    assert calls[8] == (
+        "POST",
+        "/v1/alerts/fp-abc/policy",
+        {"policy": "manual", "note": "feishu"},
+    )
+    assert calls[9] == ("POST", "/v1/alerts/fp-abc/run", {})
+    assert calls[10] == (
+        "POST",
+        "/v1/alerts/fp-abc/policy",
+        {"policy": "ignore", "note": "feishu"},
+    )
+    assert calls[11] == ("GET", "/v1/evidence", None)
+    assert calls[12] == (
+        "POST",
+        "/v1/tasks",
+        {"prompt": "帮我看看磁盘", "repo": "", "project": ""},
+    )
+    await gateway.handle_feishu_text("cp-13", "allowed-user", "看看磁盘剩余")
+    assert calls[13] == (
+        "POST",
+        "/v1/tasks",
+        {"prompt": "看看磁盘剩余", "repo": "", "project": ""},
     )

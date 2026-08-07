@@ -18,14 +18,12 @@ services:
       GATEWAY_SECRETS_DIR: /run/secrets
       GATEWAY_STATE_DB: /var/lib/feishu-gateway/state.db
       GATEWAY_PUBLIC_PORT: "8083"
-      DIFY_BASE_URL: http://docker-api-1:5001/v1
-      DIFY_HEALTH_URL: http://docker-api-1:5001/health
       PROMETHEUS_BASE_URL: http://prometheus:9090
       CONTROL_PLANE_BASE_URL: http://host.docker.internal:18083
       FEISHU_WS_ENABLED: "true"
     volumes:
-      - /srv/secrets/feishu-dify-gateway:/run/secrets:ro
-      - /srv/data/feishu-dify-gateway:/var/lib/feishu-gateway
+      - feishu_secrets:/run/secrets:ro
+      - feishu_gateway_data:/var/lib/feishu-gateway
     networks:
       - shared-net
     healthcheck:
@@ -43,4 +41,9 @@ services:
 
 networks:
   shared-net:
+    external: true
+
+volumes:
+  feishu_gateway_data:
+  feishu_secrets:
     external: true

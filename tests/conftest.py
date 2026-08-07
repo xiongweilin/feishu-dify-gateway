@@ -7,7 +7,6 @@ import pytest
 
 from feishu_dify_gateway.config import Settings
 from feishu_dify_gateway.metrics import Metrics
-from feishu_dify_gateway.models import DifyChatResponse
 from feishu_dify_gateway.service import GatewayService
 from feishu_dify_gateway.store import StateStore
 
@@ -26,22 +25,6 @@ class FakeSender:
         if self.failure is not None:
             raise self.failure
         self.messages.append((recipient_open_id, text))
-
-    async def ready(self) -> bool:
-        return self.is_ready
-
-    async def close(self) -> None:
-        return None
-
-
-class FakeDify:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str, str]] = []
-        self.is_ready = True
-
-    async def chat(self, query: str, user: str, conversation_id: str = "") -> DifyChatResponse:
-        self.calls.append((query, user, conversation_id))
-        return DifyChatResponse(answer=f"answer:{query}", conversation_id="conversation-1")
 
     async def ready(self) -> bool:
         return self.is_ready
@@ -72,7 +55,6 @@ def settings(tmp_path: Path) -> Settings:
         feishu_app_secret="app-secret",
         feishu_allowed_open_id="allowed-user",
         feishu_alert_recipient_open_id="alert-user",
-        dify_api_key="dify-key",
         user_hmac_key="user-key",
         notification_hmac_key="notify-key",
         control_plane_key="cp-key",
@@ -96,9 +78,8 @@ class FakeControlPlane:
 @pytest.fixture
 async def service(
     settings: Settings,
-) -> AsyncIterator[tuple[GatewayService, FakeSender, FakeDify, FakePrometheus, FakeControlPlane]]:
+) -> AsyncIterator[tuple[GatewayService, FakeSender, FakePrometheus, FakeControlPlane]]:
     sender = FakeSender()
-    dify = FakeDify()
     prometheus = FakePrometheus()
     control_plane = FakeControlPlane()
     gateway = GatewayService(
@@ -106,9 +87,8 @@ async def service(
         StateStore(settings.state_db),
         Metrics(),
         sender,
-        dify,
         prometheus,
         control_plane,
     )
-    yield gateway, sender, dify, prometheus, control_plane
+    yield gateway, sender, prometheus, control_plane
     await gateway.close()
