@@ -58,4 +58,4 @@ Compose 从 `/srv/secrets/feishu-dify-gateway` 挂载以下文件：
 {"error":{"code":"ERROR_CODE","message":"Safe explanation"}}
 ```
 
-详细决策见 [ADR-001](docs/decisions/0001-use-feishu-long-connection-and-dify.md)。
+详细决策见 [ADR-001](docs/decisions/0001-use-feishu-long-connection-and-dify.md)（长连接）与 [ADR-002](docs/decisions/0002-dispatch-messages-to-control-plane-codex.md)（消息派发 Codex、移除 Dify Chatflow）。
