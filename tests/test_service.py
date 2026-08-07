@@ -170,6 +170,7 @@ async def test_control_plane_commands_route_to_client(
         "/cp run fp-abc",
         "/cp ignore fp-abc",
         "/cp evidence",
+        "/cp dismiss cand-1",
         "/task 帮我看看磁盘",
     )
     for index, command in enumerate(commands):
@@ -209,11 +210,16 @@ async def test_control_plane_commands_route_to_client(
     assert calls[11] == ("GET", "/v1/evidence", None)
     assert calls[12] == (
         "POST",
+        "/v1/candidates/cand-1/dismiss",
+        {"decided_by": "feishu", "note": ""},
+    )
+    assert calls[13] == (
+        "POST",
         "/v1/tasks",
         {"prompt": "帮我看看磁盘", "repo": "", "project": ""},
     )
-    await gateway.handle_feishu_text("cp-13", "allowed-user", "看看磁盘剩余")
-    assert calls[13] == (
+    await gateway.handle_feishu_text("cp-14", "allowed-user", "看看磁盘剩余")
+    assert calls[14] == (
         "POST",
         "/v1/tasks",
         {"prompt": "看看磁盘剩余", "repo": "", "project": ""},

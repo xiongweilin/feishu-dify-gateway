@@ -264,6 +264,7 @@ class GatewayService:
                 "/cp run <fingerprint> 手动策略下执行修复\n"
                 "/cp ignore <fingerprint> 忽略该告警\n"
                 "/cp evidence 查看沉淀证据与候选\n"
+                "/cp dismiss <candidate_id> 归档候选\n"
                 "/task <描述> 派发任务给 Agent 执行"
             )
         if command == "/status":
@@ -340,6 +341,12 @@ class GatewayService:
             )
         if action == "evidence":
             return await self.control_plane.request("GET", "/v1/evidence")
+        if action == "dismiss" and arg:
+            return await self.control_plane.request(
+                "POST",
+                f"/v1/candidates/{arg}/dismiss",
+                {"decided_by": "feishu", "note": ""},
+            )
         return (
             "用法：\n"
             "/cp status\n"
@@ -349,6 +356,7 @@ class GatewayService:
             "/cp policy <fingerprint> auto|manual|ignore\n"
             "/cp run <fingerprint> | ignore <fingerprint>\n"
             "/cp evidence\n"
+            "/cp dismiss <candidate_id>\n"
             "/task <描述> 派发任务给 Agent 执行"
         )
 

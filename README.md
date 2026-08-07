@@ -11,7 +11,7 @@
 - 仅允许一个配置的飞书 `open_id`。
 - 支持文本及 `/help`、`/status`、`/alerts` 只读命令；任意非命令消息等价于 `/task <描述>`，派发任务给 Codex。
 - 控制平面命令：`/cp status`、`/cp approve <id>`、`/cp reject <id>`、`/cp rollback <id>`、`/cp pause`、`/cp resume`、`/cp promote <candidate_id>`；由控制平面确认后执行，非命令文本统一派发任务给 Codex。
-- 控制平面策略命令：`/cp policy <fingerprint> auto|manual|ignore`、`/cp run <fingerprint>`、`/cp ignore <fingerprint>`、`/cp evidence`。
+- 控制平面策略命令：`/cp policy <fingerprint> auto|manual|ignore`、`/cp run <fingerprint>`、`/cp ignore <fingerprint>`、`/cp evidence`、`/cp dismiss <candidate_id>`。
 - `/v1/notifications` 必须使用时间戳、事件 ID 和 HMAC-SHA256 签名。
 - `/v1/alerts/alertmanager` 只通过 Docker `shared-net` 使用。
 - 控制平面审批回调使用 `X-Control-Plane-Key` 共享密钥头；`CONTROL_PLANE_BASE_URL` 指向 Windows 宿主 `http://host.docker.internal:18083`。
