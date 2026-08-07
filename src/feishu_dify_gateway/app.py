@@ -139,9 +139,9 @@ def create_app(
 
     @app.get("/readyz", include_in_schema=False)
     async def ready() -> Response:
-        feishu_ok, dify_ok = await gateway.core_readiness()
+        feishu_ok = await gateway.core_readiness()
         connection_ok = not enable_ws or (connection is not None and connection.running)
-        if feishu_ok and dify_ok and connection_ok:
+        if feishu_ok and connection_ok:
             return JSONResponse({"status": "ready"})
         return error_response("NOT_READY", "One or more dependencies are unavailable", 503)
 

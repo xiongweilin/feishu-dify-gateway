@@ -30,7 +30,6 @@ write_value() {
 
 write_value feishu_app_id 'Feishu App ID'
 write_value feishu_app_secret 'Feishu App Secret'
-write_value dify_api_key 'Dedicated Dify Chatflow API Key'
 write_value user_hmac_key 'User pseudonym HMAC key'
 write_value notification_hmac_key 'Shared notification HMAC key'
 write_value control_plane_key 'Control plane shared API key'
