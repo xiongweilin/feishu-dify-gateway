@@ -5,7 +5,7 @@
 ## 1. 准备
 
 1. 飞书应用仅本人可见，启用机器人和长连接事件订阅，只授予单聊消息读取、发送所需权限。
-2. 发布专用 Dify Chatflow 并创建独立 API Key。
+2. 确认控制平面已运行并配置 `CONTROL_PLANE_API_KEY`；网关 secret 目录包含一致的 `control_plane_key`（Dify Chatflow 已移除，无需 Chatflow API Key）。
 3. 在 WSL 交互执行 `sudo deploy/wsl/install-gateway-secrets.sh`，再执行 `deploy/wsl/capture-open-id.sh` 并向机器人发送一条私聊；工具把 ID 直接写入一个 `600` secret 文件，不显示其值或正文。
 4. 在云端先以仓库所有者执行 `deploy/cloud/install-runtime.sh`，再交互执行 `sudo deploy/cloud/install-cloud-secrets.sh`；Windows 交互执行 `deploy/windows/set-feishu-gateway-credential.ps1`。
 5. 保存当前容器、Alertmanager、Prometheus、Tailscale Serve、云端 relay 和 Windows 任务的最小基线。
@@ -20,10 +20,10 @@
 
 ## 3. 功能与故障验收
 
-1. 私聊验证普通文本、连续会话、`/help`、`/new`、`/status`、`/alerts`。
+1. 私聊验证任意文本派发任务（`/v1/tasks`）、`/task <描述>`、`/help`、`/status`、`/alerts` 与 `/cp` 命令（status/approve/reject/rollback/policy/run/ignore/evidence/pause/resume/promote）。
 2. 验证 firing 和 resolved 告警各一次；重复 fingerprint 只投递一次。
 3. 验证 GitHub、Sonar 和 Windows 维护通知；队列文件只在 gateway 返回 2xx 后删除。
-4. 注入重复事件、飞书 429/5xx、Dify 超时、gateway 重启与 WSL 离线，验证重试、幂等、队列保留和恢复补发。
+4. 注入重复事件、飞书 429/5xx、控制平面不可达或预算耗尽、gateway 重启与 Windows/Docker 离线，验证重试、幂等、队列保留和恢复补发。
 5. 让就绪检查连续失败三次，并模拟持续五分钟；验证 Gmail 首次、六小时限频和恢复通知。
 6. 检查日志和指标，不得出现正文、原始用户标识、URL、凭证或上游响应体。
 
