@@ -8,7 +8,7 @@ import pytest
 from cloud.relay import DurableQueue, normalize_event
 
 
-def test_github_normalization_keeps_only_allowlisted_fields() -> None:
+def test_github_webhook_is_acknowledged_but_not_forwarded() -> None:
     body = json.dumps(
         {
             "repository": {"full_name": "owner/repo", "private_secret": "do-not-keep"},
@@ -22,13 +22,10 @@ def test_github_normalization_keeps_only_allowlisted_fields() -> None:
         }
     ).encode()
     event_id, notification = normalize_event(
-        "/webhooks/github", {"X-GitHub-Event": "workflow_run", "X-GitHub-Delivery": "d-1"}, body
+        "/webhooks/github", {"X-GitHub-Event": "check_suite", "X-GitHub-Delivery": "d-1"}, body
     )
-    serialized = json.dumps(notification)
     assert event_id == "d-1"
-    assert notification["severity"] == "warning"
-    assert "owner/repo" in notification["text"]
-    assert "do-not-keep" not in serialized
+    assert notification is None
 
 
 def test_queue_keeps_item_until_acknowledged(tmp_path: Path) -> None:

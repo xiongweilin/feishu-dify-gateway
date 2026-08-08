@@ -87,26 +87,16 @@ def normalize_event(path: str, headers: Any, body: bytes) -> tuple[str, dict[str
 
     occurred_at = datetime.now(UTC).isoformat()
     if path == "/webhooks/github":
-        source = "github"
+        # GitHub webhook -> Feishu notification design removed 2026-08-08
+        # (check_suite spam). Acknowledge with 2xx but never forward.
         event = _string(headers.get("X-GitHub-Event"), 64) or "unknown"
         delivery = _string(headers.get("X-GitHub-Delivery"), 200)
         event_id = delivery if EVENT_ID_RE.fullmatch(delivery) else hashlib.sha256(body).hexdigest()
-        repository = data.get("repository") if isinstance(data.get("repository"), dict) else {}
-        workflow = data.get("workflow_run") if isinstance(data.get("workflow_run"), dict) else {}
-        repo_name = _string(repository.get("full_name"), 256) or "unknown repository"
-        conclusion = _string(workflow.get("conclusion"), 64)
-        workflow_name = _string(workflow.get("name"), 256)
-        url = safe_url(workflow.get("html_url") or repository.get("html_url"))
-        detail = " / ".join(part for part in (repo_name, workflow_name, conclusion) if part)
-        notification = {
-            "source": source,
-            "severity": (
-                "warning" if conclusion in {"failure", "cancelled", "timed_out"} else "info"
-            ),
-            "title": f"GitHub {event}"[:512],
-            "text": (detail or "GitHub webhook received")[:10_000],
-            "occurredAt": occurred_at,
-        }
+        logger.info(
+            "github webhook ignored by design",
+            extra={"event": "github_ignored", "github_event": event},
+        )
+        return event_id, None
     elif path == "/webhooks/sonar":
         source = "sonar"
         project = data.get("project") if isinstance(data.get("project"), dict) else {}
@@ -312,8 +302,14 @@ def handler_factory(queue: DurableQueue, metrics: RelayMetrics) -> type[BaseHTTP
             except ValueError:
                 self.send_error(422)
                 return
-            inserted = queue.enqueue(event_id, notification)
             metrics.received += 1
+            if notification is None:
+                self.send_response(202)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"status":"ignored"}\n')
+                return
+            inserted = queue.enqueue(event_id, notification)
             if not inserted:
                 metrics.duplicates += 1
             self.send_response(202)
