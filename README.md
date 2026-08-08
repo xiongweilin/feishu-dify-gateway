@@ -29,7 +29,7 @@ uv run mypy
 
 ## 运行配置
 
-Compose 从 `/srv/secrets/feishu-dify-gateway` 挂载以下文件：
+Compose 通过外部命名卷 `feishu_secrets`（Windows Docker Desktop，项目目录 `D:\infrastructure\compose\feishu-dify-gateway`）以只读方式挂载以下文件；WSL 已于 2026-08-07 退役，`deploy/wsl/` 仅作历史参考：
 
 | 文件 | 用途 |
 |---|---|
@@ -40,7 +40,7 @@ Compose 从 `/srv/secrets/feishu-dify-gateway` 挂载以下文件：
 | `notification_hmac_key` | 云端 relay 与 Windows helper 的请求签名 |
 | `control_plane_key` | 控制平面审批与状态接口的共享密钥 |
 
-所有文件必须为 `600`，目录必须为 `700`，并归属容器内专用 UID/GID `10001`；状态目录使用同一归属。凭证不得进入 Git、Docker 环境变量、日志或文档。实际凭证由用户在目标主机通过 `sudo deploy/wsl/install-gateway-secrets.sh` 交互录入；不要通过聊天或命令输出传递。
+所有文件必须为 `600`，目录必须为 `700`，并归属容器内专用 UID/GID `10001`；状态目录使用同一归属。凭证不得进入 Git、Docker 环境变量、日志或文档。实际凭证由用户交互录入 Windows Credential Manager（`Agent:Metratio:FeishuFile:*` 及既有 Feishu 条目）与 `feishu_secrets` 卷（参考 `deploy/windows/` 与 `deploy/SECRETS.md`），不通过聊天或命令输出传递。
 
 ## 内部接口
 
