@@ -1,5 +1,0 @@
-- job_name: feishu-dify-gateway
-  metrics_path: /metrics
-  static_configs:
-    - targets:
-        - feishu-dify-gateway:8082

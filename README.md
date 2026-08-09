@@ -29,7 +29,7 @@ uv run mypy
 
 ## 运行配置
 
-Compose 通过外部命名卷 `feishu_secrets`（Windows Docker Desktop，项目目录 `D:\infrastructure\compose\feishu-dify-gateway`）以只读方式挂载以下文件；WSL 已于 2026-08-07 退役，`deploy/wsl/` 仅作历史参考：
+Compose 通过外部命名卷 `feishu_secrets`（Windows Docker Desktop，项目目录 `D:\infrastructure\compose\feishu-dify-gateway`）以只读方式挂载以下文件：
 
 | 文件 | 用途 |
 |---|---|
