@@ -42,6 +42,8 @@ Compose 通过外部命名卷 `feishu_secrets`（Windows Docker Desktop，项目
 
 所有文件必须为 `600`，目录必须为 `700`，并归属容器内专用 UID/GID `10001`；状态目录使用同一归属。凭证不得进入 Git、Docker 环境变量、日志或文档。实际凭证由用户交互录入 Windows Credential Manager（`Agent:Metratio:FeishuFile:*` 及既有 Feishu 条目）与 `feishu_secrets` 卷（参考 `deploy/windows/` 与 `deploy/SECRETS.md`），不通过聊天或命令输出传递。
 
+云端 webhook relay 与 watchdog 通过 Tailscale 网络访问受限接口（`http://metratio.tail1f4641.ts.net:8082`，映射为 Tailscale TCP 8082 → 宿主机 `127.0.0.1:18082` → 容器受限 `8083` 监听，不暴露 Alertmanager 路由）：relay 负责外部 webhook 的持久队列与重试投递（`/v1/notifications`），watchdog 在网关就绪检查持续失败时经 QQ SMTP 发送带外邮件（约 5 分钟触发，之后每 6 小时提醒）。云端部署与密钥录入见 `deploy/cloud/`（relay/watchdog systemd 单元与 `install-cloud-secrets.sh`）。
+
 ## 内部接口
 
 - `POST /v1/alerts/alertmanager`
