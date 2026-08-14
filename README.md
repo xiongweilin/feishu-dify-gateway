@@ -2,15 +2,15 @@
 
 个人飞书应用机器人的私有网关。它承担三类职责：
 
-- 通过飞书长连接接收本人单聊消息；非命令消息直接派发给控制平面的 Codex Agent 执行；
+- 通过飞书长连接接收本人单聊消息；非命令消息直接派发给控制平面的 dsh Agent 执行；
 - 接收 Alertmanager 和基础设施通知，投递到本人飞书私聊；
 - 输出健康、就绪和 Prometheus 指标，不记录消息正文、凭证或原始用户标识。
 
 ## 边界
 
 - 仅允许一个配置的飞书 `open_id`。
-- 支持文本及 `/help`、`/status`、`/alerts` 只读命令；任意非命令消息等价于 `/task <描述>`，派发任务给 Codex。
-- 控制平面命令：`/cp status`、`/cp approve <id>`、`/cp reject <id>`、`/cp rollback <id>`、`/cp pause`、`/cp resume`、`/cp promote <candidate_id>`；由控制平面确认后执行，非命令文本统一派发任务给 Codex。
+- 支持文本及 `/help`、`/status`、`/alerts` 只读命令；任意非命令消息等价于 `/task <描述>`，派发任务给控制平面 dsh Agent。
+- 控制平面命令：`/cp status`、`/cp approve <id>`、`/cp reject <id>`、`/cp rollback <id>`、`/cp pause`、`/cp resume`、`/cp promote <candidate_id>`；由控制平面确认后执行，非命令文本统一派发任务给 dsh Agent。
 - 控制平面策略命令：`/cp policy <fingerprint> auto|manual|ignore`、`/cp run <fingerprint>`、`/cp ignore <fingerprint>`、`/cp evidence`、`/cp dismiss <candidate_id>`。
 - `/v1/notifications` 必须使用时间戳、事件 ID 和 HMAC-SHA256 签名。
 - `/v1/alerts/alertmanager` 只通过 Docker `shared-net` 使用。
