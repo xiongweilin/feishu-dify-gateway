@@ -1,24 +1,24 @@
 # Feishu Gateway
 
-个人飞书应用机器人的私有网关。它承担三类职责：
+The private gateway for the personal Feishu app bot. It has three responsibilities:
 
-- 通过飞书长连接接收本人单聊消息；非命令消息直接派发给控制平面的 dsh Agent 执行；
-- 接收 Alertmanager 和基础设施通知，投递到本人飞书私聊；
-- 输出健康、就绪和 Prometheus 指标，不记录消息正文、凭证或原始用户标识。
+- Receives my single-chat messages through the Feishu long connection; non-command messages are dispatched directly to the control plane's dsh Agent for execution;
+- Receives Alertmanager and infrastructure notifications and delivers them to my Feishu private chat;
+- Exposes health, readiness, and Prometheus metrics; records no message bodies, credentials, or raw user identifiers.
 
-## 边界
+## Boundaries
 
-- 仅允许一个配置的飞书 `open_id`。
-- 支持文本及 `/help`、`/status`、`/alerts` 只读命令；任意非命令消息等价于 `/task <描述>`，派发任务给控制平面 dsh Agent。
-- 控制平面命令：`/cp status`、`/cp approve <id>`、`/cp reject <id>`、`/cp rollback <id>`、`/cp pause`、`/cp resume`、`/cp promote <candidate_id>`；由控制平面确认后执行，非命令文本统一派发任务给 dsh Agent。
-- 控制平面策略命令：`/cp policy <fingerprint> auto|manual|ignore`、`/cp run <fingerprint>`、`/cp ignore <fingerprint>`、`/cp evidence`、`/cp dismiss <candidate_id>`。
-- `/v1/notifications` 必须使用时间戳、事件 ID 和 HMAC-SHA256 签名。
-- `/v1/alerts/alertmanager` 只通过 Docker `shared-net` 使用。
-- 控制平面审批回调使用 `X-Control-Plane-Key` 共享密钥头；`CONTROL_PLANE_BASE_URL` 指向 Windows 宿主 `http://host.docker.internal:18083`。
-- 飞书响应一律按不可信外部输入校验。
-- 幂等库只保存事件 ID、状态和时间，不保存消息正文。
+- Allows only one configured Feishu `open_id`.
+- Supports text and the read-only commands `/help`, `/status`, `/alerts`; any non-command message is equivalent to `/task <description>` and dispatches a task to the control plane's dsh Agent.
+- Control-plane commands: `/cp status`, `/cp approve <id>`, `/cp reject <id>`, `/cp rollback <id>`, `/cp pause`, `/cp resume`, `/cp promote <candidate_id>`; executed after the control plane confirms; non-command text uniformly dispatches tasks to the dsh Agent.
+- Control-plane policy commands: `/cp policy <fingerprint> auto|manual|ignore`, `/cp run <fingerprint>`, `/cp ignore <fingerprint>`, `/cp evidence`, `/cp dismiss <candidate_id>`.
+- `/v1/notifications` must use a timestamp, event id, and HMAC-SHA256 signature.
+- `/v1/alerts/alertmanager` is used only through the Docker `shared-net`.
+- Control-plane approval callbacks use the `X-Control-Plane-Key` shared-key header; `CONTROL_PLANE_BASE_URL` points to the Windows host `http://host.docker.internal:18083`.
+- Feishu responses are always validated as untrusted external input.
+- The idempotency store keeps only event ids, status, and time — never message bodies.
 
-## 开发
+## Development
 
 ```powershell
 uv sync
@@ -27,24 +27,24 @@ uv run ruff check .
 uv run mypy
 ```
 
-## 运行配置
+## Runtime configuration
 
-Compose 通过外部命名卷 `feishu_secrets`（Windows Docker Desktop，项目目录 `D:\infrastructure\compose\feishu-dify-gateway`）以只读方式挂载以下文件：
+Compose mounts the following files read-only from the external named volume `feishu_secrets` (Windows Docker Desktop, project directory `D:\infrastructure\compose\feishu-dify-gateway`):
 
-| 文件 | 用途 |
+| File | Purpose |
 |---|---|
-| `feishu_app_id` | 飞书应用 App ID |
-| `feishu_app_secret` | 飞书应用 App Secret |
-| `feishu_user_open_id` | 唯一允许交互且接收告警的用户；由一次性捕获工具直接写入 |
-| `user_hmac_key` | 对飞书用户标识做不可逆映射 |
-| `notification_hmac_key` | 云端 relay 与 Windows helper 的请求签名 |
-| `control_plane_key` | 控制平面审批与状态接口的共享密钥 |
+| `feishu_app_id` | Feishu app App ID |
+| `feishu_app_secret` | Feishu app App Secret |
+| `feishu_user_open_id` | The only user allowed to interact and receive alerts; written directly by the one-shot capture tool |
+| `user_hmac_key` | irreversible mapping of the Feishu user identifier |
+| `notification_hmac_key` | request signing for the cloud relay and the Windows helper |
+| `control_plane_key` | shared key for the control plane's approval and status interfaces |
 
-所有文件必须为 `600`，目录必须为 `700`，并归属容器内专用 UID/GID `10001`；状态目录使用同一归属。凭证不得进入 Git、Docker 环境变量、日志或文档。实际凭证由用户交互录入 Windows Credential Manager（`Agent:Metratio:FeishuFile:*` 及既有 Feishu 条目）与 `feishu_secrets` 卷（参考 `deploy/windows/` 与 `deploy/SECRETS.md`），不通过聊天或命令输出传递。
+All files must be `600`, the directory `700`, owned by the dedicated in-container UID/GID `10001`; the state directory uses the same ownership. Credentials never enter Git, Docker environment variables, logs, or documentation. Real credentials are entered interactively by the user into Windows Credential Manager (`Agent:Metratio:FeishuFile:*` and existing Feishu entries) and the `feishu_secrets` volume (see `deploy/windows/` and `deploy/SECRETS.md`), never passed through chat or command output.
 
-云端 webhook relay 与 watchdog 通过 Tailscale 网络访问受限接口（`http://metratio.tail1f4641.ts.net:8082`，映射为 Tailscale TCP 8082 → 宿主机 `127.0.0.1:18082` → 容器受限 `8083` 监听，不暴露 Alertmanager 路由）：relay 负责外部 webhook 的持久队列与重试投递（`/v1/notifications`），watchdog 在网关就绪检查持续失败时经 QQ SMTP 发送带外邮件（约 5 分钟触发，之后每 6 小时提醒）。云端部署与密钥录入见 `deploy/cloud/`（relay/watchdog systemd 单元与 `install-cloud-secrets.sh`）。
+The cloud webhook relay and watchdog reach restricted endpoints through the Tailscale network (`http://metratio.tail1f4641.ts.net:8082`, mapped as Tailscale TCP 8082 → host `127.0.0.1:18082` → container restricted `8083` listener, which hides the Alertmanager route): the relay owns persistent queuing and retry delivery for external webhooks (`/v1/notifications`), and the watchdog sends out-of-band email via QQ SMTP when the gateway readiness check keeps failing (triggers at about 5 minutes, then reminds every 6 hours). Cloud deployment and secret entry: see `deploy/cloud/` (relay/watchdog systemd units and `install-cloud-secrets.sh`).
 
-## 内部接口
+## Internal interfaces
 
 - `POST /v1/alerts/alertmanager`
 - `POST /v1/notifications`
@@ -52,12 +52,12 @@ Compose 通过外部命名卷 `feishu_secrets`（Windows Docker Desktop，项目
 - `GET /readyz`
 - `GET /metrics`
 
-容器内 `8082` 是只在 `shared-net` 使用的内部接口；宿主机 `127.0.0.1:18082` 只映射到受限的 `8083` 监听，后者会隐藏 Alertmanager 路由。
+Inside the container, `8082` is the internal interface used only on `shared-net`; the host `127.0.0.1:18082` maps only to the restricted `8083` listener, which hides the Alertmanager route.
 
-错误统一为：
+Errors are unified as:
 
 ```json
 {"error":{"code":"ERROR_CODE","message":"Safe explanation"}}
 ```
 
-详细决策见 [ADR-001](docs/decisions/0001-use-feishu-long-connection-and-dify.md)（长连接）与 [ADR-002](docs/decisions/0002-dispatch-messages-to-control-plane-codex.md)（消息派发 Codex、移除 Dify Chatflow）。
+Detailed decisions: [ADR-001](docs/decisions/0001-use-feishu-long-connection-and-dify.md) (long connection) and [ADR-002](docs/decisions/0002-dispatch-messages-to-control-plane-codex.md) (dispatch messages to Codex, removed the Dify Chatflow).
