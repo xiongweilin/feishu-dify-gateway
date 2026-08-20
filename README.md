@@ -1,5 +1,8 @@
 # Feishu Gateway
 
+[![CI](https://github.com/ratiolin/feishu-dify-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/ratiolin/feishu-dify-gateway/actions/workflows/ci.yml) [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=metratio_feishu-dify-gateway&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=metratio_feishu-dify-gateway) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=metratio_feishu-dify-gateway&metric=coverage)](https://sonarcloud.io/summary/new_code?id=metratio_feishu-dify-gateway) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](pyproject.toml)
+
+
 The private gateway for the personal Feishu app bot. It has three responsibilities:
 
 - Receives my single-chat messages through the Feishu long connection; non-command messages are dispatched directly to the control plane's dsh Agent for execution;
