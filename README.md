@@ -1,17 +1,30 @@
 # Feishu Gateway
 
-[![CI](https://github.com/ratiolin/feishu-dify-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/ratiolin/feishu-dify-gateway/actions/workflows/ci.yml) [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=metratio_feishu-dify-gateway&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=metratio_feishu-dify-gateway) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=metratio_feishu-dify-gateway&metric=coverage)](https://sonarcloud.io/summary/new_code?id=metratio_feishu-dify-gateway) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](pyproject.toml)
+[![CI](https://github.com/xiongweilin/feishu-dify-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/xiongweilin/feishu-dify-gateway/actions/workflows/ci.yml) [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=metratio_feishu-dify-gateway&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=metratio_feishu-dify-gateway) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=metratio_feishu-dify-gateway&metric=coverage)](https://sonarcloud.io/summary/new_code?id=metratio_feishu-dify-gateway) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](pyproject.toml)
 The private gateway for the personal Feishu app bot. It has three responsibilities:
 
-- Receives my single-chat messages through the Feishu long connection; non-command messages are dispatched directly to the control plane's dsh Agent for execution;
+- Receives my single-chat messages through the Feishu long connection; non-command messages are dispatched directly to the control plane's Codex Agent for execution;
 - Receives Alertmanager and infrastructure notifications and delivers them to my Feishu private chat;
 - Exposes health, readiness, and Prometheus metrics; records no message bodies, credentials, or raw user identifiers.
+
+## Repository boundary
+
+The repository name is historical. Dify Chatflow dispatch was removed by ADR-002; this repository now owns the Feishu transport, interaction, notification and ingress-security boundary only.
+
+```text
+Feishu gateway transport / command ingress
+!= task decision or model authority
+!= effect authorization
+!= objective verification or repair closure
+```
+
+Task execution and repair governance belong to `xiongweilin/control-plane`. This gateway forwards requests and renders confirmed responses; it does not mint task authority or infer completion from transport success.
 
 ## Boundaries
 
 - Allows only one configured Feishu `open_id`.
-- Supports text and the read-only commands `/help`, `/status`, `/alerts`; any non-command message is equivalent to `/task <description>` and dispatches a task to the control plane's dsh Agent.
-- Control-plane commands: `/cp status`, `/cp approve <id>`, `/cp reject <id>`, `/cp rollback <id>`, `/cp pause`, `/cp resume`, `/cp promote <candidate_id>`; executed after the control plane confirms; non-command text uniformly dispatches tasks to the dsh Agent.
+- Supports text and the read-only commands `/help`, `/status`, `/alerts`; any non-command message is equivalent to `/task <description>` and dispatches a task to the control plane's Codex Agent.
+- Control-plane commands: `/cp status`, `/cp approve <id>`, `/cp reject <id>`, `/cp rollback <id>`, `/cp pause`, `/cp resume`, `/cp promote <candidate_id>`; executed after the control plane confirms; non-command text uniformly dispatches tasks to the Codex Agent.
 - Control-plane policy commands: `/cp policy <fingerprint> auto|manual|ignore`, `/cp run <fingerprint>`, `/cp ignore <fingerprint>`, `/cp evidence`, `/cp dismiss <candidate_id>`.
 - `/v1/notifications` must use a timestamp, event id, and HMAC-SHA256 signature.
 - `/v1/alerts/alertmanager` is used only through the Docker `shared-net`.
@@ -62,4 +75,3 @@ Errors are unified as:
 ```
 
 Detailed decisions: [ADR-001](docs/decisions/0001-use-feishu-long-connection-and-dify.md) (long connection) and [ADR-002](docs/decisions/0002-dispatch-messages-to-control-plane-codex.md) (dispatch messages to Codex, removed the Dify Chatflow).
-
