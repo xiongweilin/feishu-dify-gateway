@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from cloud.watchdog import WatchdogState, env_flag, transition
+import json
+
+from cloud.watchdog import WatchdogState, env_flag, main, transition
 
 
 def test_env_flag_defaults_and_parses_common_values(monkeypatch) -> None:
@@ -10,6 +12,29 @@ def test_env_flag_defaults_and_parses_common_values(monkeypatch) -> None:
     assert env_flag("WATCHDOG_EMAIL_ENABLED", True) is False
     monkeypatch.setenv("WATCHDOG_EMAIL_ENABLED", "ON")
     assert env_flag("WATCHDOG_EMAIL_ENABLED", False) is True
+
+
+def test_main_skips_smtp_when_email_is_disabled(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("WATCHDOG_EMAIL_ENABLED", "false")
+    monkeypatch.setenv("WATCHDOG_STATE_FILE", str(tmp_path / "state.json"))
+    monkeypatch.setattr("cloud.watchdog.gateway_ready", lambda _url: False)
+
+    def fail_send_mail(*_args, **_kwargs) -> None:
+        raise AssertionError("SMTP must be skipped")
+
+    monkeypatch.setattr(
+        "cloud.watchdog.send_mail",
+        fail_send_mail,
+    )
+    times = iter((1000, 1100, 1200))
+    monkeypatch.setattr("cloud.watchdog.time.time", lambda: next(times))
+
+    for _ in range(3):
+        main()
+
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert state["failures"] == 3
+    assert state["notified"] is False
 
 
 def test_watchdog_triggers_after_three_consecutive_failures() -> None:
