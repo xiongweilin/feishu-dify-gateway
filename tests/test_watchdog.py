@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from cloud.watchdog import WatchdogState, transition
+from cloud.watchdog import WatchdogState, env_flag, transition
+
+
+def test_env_flag_defaults_and_parses_common_values(monkeypatch) -> None:
+    monkeypatch.delenv("WATCHDOG_EMAIL_ENABLED", raising=False)
+    assert env_flag("WATCHDOG_EMAIL_ENABLED", True) is True
+    monkeypatch.setenv("WATCHDOG_EMAIL_ENABLED", "false")
+    assert env_flag("WATCHDOG_EMAIL_ENABLED", True) is False
+    monkeypatch.setenv("WATCHDOG_EMAIL_ENABLED", "ON")
+    assert env_flag("WATCHDOG_EMAIL_ENABLED", False) is True
 
 
 def test_watchdog_triggers_after_three_consecutive_failures() -> None:

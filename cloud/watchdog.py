@@ -22,6 +22,14 @@ class WatchdogState:
     last_notice_at: int = 0
 
 
+def env_flag(name: str, default: bool) -> bool:
+    """Read a boolean environment flag without exposing configuration values."""
+    value: str | None = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def read_secret(directory: Path, name: str) -> str:
     path = directory / name
     if not path.is_file() or path.is_symlink() or path.stat().st_mode & 0o077:
@@ -71,7 +79,7 @@ def transition(state: WatchdogState, ready: bool, now: int) -> str:
 def gateway_ready(url: str) -> bool:
     try:
         with urllib.request.urlopen(url, timeout=10) as response:
-            return response.status == 200
+            return int(response.status) == 200
     except (OSError, urllib.error.URLError):
         return False
 
@@ -100,10 +108,17 @@ def main() -> None:
     )
     secret_dir = Path(os.getenv("WATCHDOG_SECRETS_DIR", "/etc/feishu-gateway-watchdog"))
     ready_url = os.getenv("WATCHDOG_READY_URL", "http://metratio.tail1f4641.ts.net:8082/readyz")
+    email_enabled = env_flag("WATCHDOG_EMAIL_ENABLED", True)
     now = int(time.time())
     state = load_state(state_path)
     action = transition(state, gateway_ready(ready_url), now)
-    if action == "failure":
+    if not email_enabled:
+        # Keep readiness tracking active while suppressing outbound SMTP.  Reset
+        # notification markers so re-enabling the flag can notify immediately
+        # if the gateway is still failing.
+        state.notified = False
+        state.last_notice_at = 0
+    elif action == "failure":
         send_mail(
             secret_dir,
             "Metratio message gateway unavailable",
