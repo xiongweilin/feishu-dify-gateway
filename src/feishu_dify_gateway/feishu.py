@@ -142,8 +142,6 @@ class FeishuSender:
                     raise GatewayError("FEISHU_SEND_FAILED", "Feishu rejected the message")
                 last_error = None
                 break
-            else:
-                raise AssertionError("unreachable")
             if last_error is not None and attempt + 1 == self._max_attempts:
                 raise GatewayError(
                     "FEISHU_SEND_FAILED", "Feishu message delivery failed"
