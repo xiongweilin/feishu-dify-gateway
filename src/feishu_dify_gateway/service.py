@@ -264,8 +264,7 @@ class GatewayService:
                 "/cp run <fingerprint> 手动策略下执行修复\n"
                 "/cp ignore <fingerprint> 忽略该告警\n"
                 "/cp evidence 查看沉淀证据与候选\n"
-                "/cp dismiss <candidate_id> 归档候选\n"
-                "/task <描述> 派发任务给 Agent 执行"
+                "/cp dismiss <candidate_id> 归档候选"
             )
         if command == "/status":
             feishu_ok, prometheus_ok = await self.readiness()
