@@ -42,12 +42,12 @@ def create_app(
     service: GatewayService | None = None,
     start_long_connection: bool | None = None,
 ) -> FastAPI:
-    metrics = Metrics()
-    state_store = StateStore(settings.state_db)
-    gateway = service or GatewayService.build(settings, state_store, metrics)
-    if service is not None:
+    if service is None:
+        metrics = Metrics()
+        gateway = GatewayService.build(settings, StateStore(settings.state_db), metrics)
+    else:
+        gateway = service
         metrics = gateway.metrics
-        state_store.close()
     enable_ws = settings.ws_enabled if start_long_connection is None else start_long_connection
     connection: FeishuLongConnection | None = None
 
