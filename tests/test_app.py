@@ -52,6 +52,50 @@ def test_alertmanager_route_is_hidden_on_public_listener(
     }
 
 
+def test_synthetic_prepare_is_internal_and_does_not_send(
+    settings: Settings,
+    service: tuple[GatewayService, FakeSender, FakePrometheus, FakeControlPlane],
+) -> None:
+    gateway, sender, _, _ = service
+    app = create_app(settings, service=gateway, start_long_connection=False)
+    with TestClient(app, base_url=f"http://testserver:{settings.port}") as client:
+        response = client.post("/v1/notifications/synthetic/prepare")
+        assert response.status_code == 201
+        payload = response.json()
+        assert payload["status"] == "prepared"
+        assert payload["externalSendStarted"] is False
+        assert payload["requiresManualConfirmation"] is True
+        event_id = payload["eventId"]
+        ledger = client.get(f"/v1/delivery-ledger/{event_id}")
+        assert ledger.status_code == 200
+        assert ledger.json()["deliveryConfirmed"] is False
+        client.base_url = client.base_url.copy_with(port=settings.public_port)
+        assert client.post("/v1/notifications/synthetic/prepare").status_code == 404
+
+    assert not sender.messages
+
+
+def test_synthetic_probe_is_internal_and_does_not_send(
+    settings: Settings,
+    service: tuple[GatewayService, FakeSender, FakePrometheus, FakeControlPlane],
+) -> None:
+    gateway, sender, _, _ = service
+    app = create_app(settings, service=gateway, start_long_connection=False)
+    with TestClient(app, base_url=f"http://testserver:{settings.port}") as client:
+        response = client.get("/v1/notifications/synthetic/probe")
+        assert response.status_code == 200
+        assert response.json() == {
+            "status": "ready",
+            "syntheticEnabled": True,
+            "externalSendStarted": False,
+            "requiresManualConfirmation": True,
+        }
+        client.base_url = client.base_url.copy_with(port=settings.public_port)
+        assert client.get("/v1/notifications/synthetic/probe").status_code == 404
+
+    assert not sender.messages
+
+
 def test_signed_notification_and_replay(
     settings: Settings,
     service: tuple[GatewayService, FakeSender, FakePrometheus, FakeControlPlane],

@@ -32,8 +32,16 @@ async def test_notification_is_delivered_once(
     second = await gateway.deliver_notification("event-1", notification)
     assert first.accepted == 1
     assert second.deduplicated == 1
+    assert first.status == "delivery_confirmed"
+    assert first.transport_accepted is True
+    assert first.delivery_confirmed is True
     assert len(sender.messages) == 1
     assert len(sender.idempotency_keys) == 1
+    entry = gateway.delivery_ledger("event-1")
+    assert entry is not None
+    assert entry.status == "delivery_confirmed"
+    assert entry.transport_accepted is True
+    assert entry.delivery_confirmed is True
 
 
 async def test_delivery_failure_releases_claim(
@@ -50,9 +58,35 @@ async def test_delivery_failure_releases_claim(
     )
     with pytest.raises(GatewayError):
         await gateway.deliver_notification("event-2", notification)
+    retrying = gateway.delivery_ledger("event-2")
+    assert retrying is not None
+    assert retrying.status == "retrying"
+    assert retrying.transport_accepted is True
+    assert retrying.delivery_confirmed is False
     sender.failure = None
     result = await gateway.deliver_notification("event-2", notification)
     assert result.accepted == 1
+
+
+async def test_non_retryable_delivery_failure_is_terminal(
+    service: tuple[GatewayService, FakeSender, FakePrometheus, FakeControlPlane],
+) -> None:
+    gateway, sender, _, _ = service
+    sender.failure = GatewayError("INVALID_DELIVERY", "safe", status_code=422)
+    notification = Notification(
+        source="test",
+        severity="warning",
+        title="title",
+        text="text",
+        occurredAt=datetime.now(UTC),
+    )
+    with pytest.raises(GatewayError):
+        await gateway.deliver_notification("terminal-event", notification)
+    entry = gateway.delivery_ledger("terminal-event")
+    assert entry is not None
+    assert entry.status == "permanent_failed"
+    assert entry.delivery_confirmed is False
+    assert gateway.store.is_processed("notification:terminal-event")
 
 
 async def test_control_plane_notification_source_is_accepted(
@@ -69,6 +103,23 @@ async def test_control_plane_notification_source_is_accepted(
     result = await gateway.deliver_notification("cp-event-1", notification)
     assert result.accepted == 1
     assert "待审批" in sender.messages[0][1]
+
+
+def test_synthetic_prepare_is_local_only(
+    service: tuple[GatewayService, FakeSender, FakePrometheus, FakeControlPlane],
+) -> None:
+    gateway, sender, _, _ = service
+    result = gateway.prepare_synthetic_notification()
+    entry = gateway.delivery_ledger(result.event_id)
+    assert result.status == "prepared"
+    assert result.external_send_started is False
+    assert result.requires_manual_confirmation is True
+    assert result.transport_accepted is False
+    assert result.delivery_confirmed is False
+    assert entry is not None
+    assert entry.status == "prepared"
+    assert entry.synthetic is True
+    assert not sender.messages
 
 
 async def test_retry_uses_the_same_feishu_idempotency_key(

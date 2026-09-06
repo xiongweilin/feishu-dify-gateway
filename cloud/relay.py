@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import tempfile
 import threading
 import time
@@ -22,6 +23,8 @@ from urllib.parse import urlparse
 MAX_BODY_BYTES = 1_048_576
 EVENT_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,200}$")
 logger = logging.getLogger("feishu-relay")
+RETRYABLE_HTTP_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
+ACTIVE_QUEUE_STATUSES = frozenset({"queued", "retrying"})
 
 
 class JsonFormatter(logging.Formatter):
@@ -126,6 +129,8 @@ class QueueItem:
     attempts: int
     next_attempt_at: int
     created_at: int
+    status: str = "queued"
+    last_error_code: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -134,7 +139,27 @@ class QueueItem:
             "attempts": self.attempts,
             "next_attempt_at": self.next_attempt_at,
             "created_at": self.created_at,
+            "status": self.status,
+            "last_error_code": self.last_error_code,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> QueueItem:
+        notification = data.get("notification")
+        if not isinstance(notification, dict):
+            raise ValueError("Queue notification must be an object")
+        event_id = data.get("event_id")
+        if not isinstance(event_id, str) or not EVENT_ID_RE.fullmatch(event_id):
+            raise ValueError("Queue event id is invalid")
+        return cls(
+            event_id=event_id,
+            notification=notification,
+            attempts=int(data.get("attempts", 0)),
+            next_attempt_at=int(data.get("next_attempt_at", 0)),
+            created_at=int(data.get("created_at", 0)),
+            status=str(data.get("status", "queued")),
+            last_error_code=str(data.get("last_error_code", "")),
+        )
 
 
 class DurableQueue:
@@ -173,20 +198,34 @@ class DurableQueue:
             for path in sorted(self.directory.glob("*.json")):
                 try:
                     data = json.loads(path.read_text(encoding="utf-8"))
-                    item = QueueItem(**data)
+                    if not isinstance(data, dict):
+                        raise ValueError("Queue item must be an object")
+                    item = QueueItem.from_dict(data)
                 except (OSError, TypeError, ValueError, json.JSONDecodeError):
                     logger.error(
                         "queue item unreadable",
                         extra={"event": "queue_item_invalid", "error_code": "INVALID_QUEUE_ITEM"},
                     )
                     continue
-                if item.next_attempt_at <= current:
+                if item.status in ACTIVE_QUEUE_STATUSES and item.next_attempt_at <= current:
                     results.append((path, item))
         return results
 
-    def failed(self, path: Path, item: QueueItem) -> None:
+    def failed(
+        self,
+        path: Path,
+        item: QueueItem,
+        error_code: str = "GATEWAY_UNAVAILABLE",
+        permanent: bool = False,
+    ) -> None:
         item.attempts += 1
-        item.next_attempt_at = int(time.time()) + min(300, 2 ** min(item.attempts, 8))
+        item.last_error_code = error_code
+        if permanent:
+            item.status = "permanent_failed"
+            item.next_attempt_at = 0
+        else:
+            item.status = "retrying"
+            item.next_attempt_at = int(time.time()) + min(300, 2 ** min(item.attempts, 8))
         with self._lock:
             if path.exists():
                 self._write(path, item)
@@ -198,6 +237,156 @@ class DurableQueue:
     def depth(self) -> int:
         return sum(1 for _ in self.directory.glob("*.json"))
 
+    def _count_status(self, statuses: frozenset[str]) -> int:
+        count = 0
+        with self._lock:
+            for path in self.directory.glob("*.json"):
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    if isinstance(data, dict) and str(data.get("status", "queued")) in statuses:
+                        count += 1
+                except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                    continue
+        return count
+
+    def pending_depth(self) -> int:
+        return self._count_status(ACTIVE_QUEUE_STATUSES)
+
+    def permanent_failure_depth(self) -> int:
+        return self._count_status(frozenset({"permanent_failed"}))
+
+
+class DeliveryLedger:
+    """Metadata-only relay ledger; notification bodies remain in the durable queue."""
+
+    def __init__(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self._connection = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
+        self._connection.row_factory = sqlite3.Row
+        self._lock = threading.RLock()
+        with self._lock:
+            self._connection.executescript(
+                """
+                PRAGMA journal_mode=WAL;
+                PRAGMA synchronous=FULL;
+                CREATE TABLE IF NOT EXISTS delivery_ledger (
+                    event_id TEXT PRIMARY KEY,
+                    source TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    transport_accepted INTEGER NOT NULL DEFAULT 0,
+                    delivery_confirmed INTEGER NOT NULL DEFAULT 0,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    last_error_code TEXT NOT NULL DEFAULT '',
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    transport_accepted_at INTEGER,
+                    delivery_confirmed_at INTEGER,
+                    next_retry_at INTEGER,
+                    terminal_at INTEGER
+                );
+                """
+            )
+
+    def record_queued(self, event_id: str, source: str, now: int | None = None) -> None:
+        timestamp = int(time.time()) if now is None else now
+        with self._lock:
+            self._connection.execute(
+                """
+                INSERT OR IGNORE INTO delivery_ledger(
+                    event_id, source, status, created_at, updated_at
+                ) VALUES (?, ?, 'queued', ?, ?)
+                """,
+                (event_id, source, timestamp, timestamp),
+            )
+
+    def record_attempt(self, event_id: str, source: str, now: int | None = None) -> None:
+        timestamp = int(time.time()) if now is None else now
+        with self._lock:
+            self._connection.execute(
+                """
+                INSERT INTO delivery_ledger(
+                    event_id, source, status, attempts, created_at, updated_at
+                ) VALUES (?, ?, 'delivering', 1, ?, ?)
+                ON CONFLICT(event_id) DO UPDATE SET
+                    source=excluded.source,
+                    status='delivering',
+                    attempts=delivery_ledger.attempts + 1,
+                    updated_at=excluded.updated_at,
+                    last_error_code='',
+                    next_retry_at=NULL,
+                    terminal_at=NULL
+                """,
+                (event_id, source, timestamp, timestamp),
+            )
+
+    def mark_transport_accepted(self, event_id: str, now: int | None = None) -> None:
+        timestamp = int(time.time()) if now is None else now
+        with self._lock:
+            self._connection.execute(
+                """
+                UPDATE delivery_ledger
+                SET status='transport_accepted', transport_accepted=1,
+                    updated_at=?, transport_accepted_at=COALESCE(transport_accepted_at, ?),
+                    last_error_code='', next_retry_at=NULL
+                WHERE event_id=?
+                """,
+                (timestamp, timestamp, event_id),
+            )
+
+    def mark_retrying(
+        self, event_id: str, error_code: str, next_retry_at: int, now: int | None = None
+    ) -> None:
+        timestamp = int(time.time()) if now is None else now
+        with self._lock:
+            self._connection.execute(
+                """
+                UPDATE delivery_ledger
+                SET status='retrying', updated_at=?, last_error_code=?, next_retry_at=?,
+                    terminal_at=NULL
+                WHERE event_id=?
+                """,
+                (timestamp, error_code, next_retry_at, event_id),
+            )
+
+    def mark_permanent_failed(
+        self, event_id: str, error_code: str, now: int | None = None
+    ) -> None:
+        timestamp = int(time.time()) if now is None else now
+        with self._lock:
+            self._connection.execute(
+                """
+                UPDATE delivery_ledger
+                SET status='permanent_failed', updated_at=?, last_error_code=?,
+                    next_retry_at=NULL, terminal_at=?
+                WHERE event_id=?
+                """,
+                (timestamp, error_code, timestamp, event_id),
+            )
+
+    def get(self, event_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM delivery_ledger WHERE event_id = ?", (event_id,)
+            ).fetchone()
+        return None if row is None else dict(row)
+
+    def prune(self, retention_seconds: int, now: int | None = None) -> int:
+        cutoff = (int(time.time()) if now is None else now) - retention_seconds
+        with self._lock:
+            cursor = self._connection.execute(
+                """
+                DELETE FROM delivery_ledger
+                WHERE updated_at < ?
+                  AND status IN ('transport_accepted', 'delivery_confirmed', 'permanent_failed')
+                """,
+                (cutoff,),
+            )
+        return cursor.rowcount
+
+    def close(self) -> None:
+        with self._lock:
+            self._connection.close()
+
 
 @dataclass(slots=True)
 class RelayMetrics:
@@ -206,8 +395,14 @@ class RelayMetrics:
     delivered: int = 0
     failed: int = 0
     last_success: int = 0
+    attempts: int = 0
+    retryable_failures: int = 0
+    permanent_failures: int = 0
+    last_transport_accepted: int = 0
 
-    def render(self, queue_depth: int) -> bytes:
+    def render(
+        self, queue_depth: int, pending_queue_depth: int = 0, permanent_failure_depth: int = 0
+    ) -> bytes:
         lines = [
             "# TYPE feishu_relay_webhooks_received_total counter",
             f"feishu_relay_webhooks_received_total {self.received}",
@@ -216,10 +411,24 @@ class RelayMetrics:
             "# TYPE feishu_relay_deliveries_total counter",
             f'feishu_relay_deliveries_total{{result="success"}} {self.delivered}',
             f'feishu_relay_deliveries_total{{result="error"}} {self.failed}',
+            "# TYPE feishu_relay_delivery_attempts_total counter",
+            f'feishu_relay_delivery_attempts_total{{result="attempt"}} {self.attempts}',
+            f'feishu_relay_delivery_attempts_total{{result="transport_accepted"}} {self.delivered}',
+            f'feishu_relay_delivery_attempts_total{{result="retryable_failure"}} '
+            f"{self.retryable_failures}",
+            f'feishu_relay_delivery_attempts_total{{result="permanent_failure"}} '
+            f"{self.permanent_failures}",
             "# TYPE feishu_relay_queue_depth gauge",
             f"feishu_relay_queue_depth {queue_depth}",
+            "# TYPE feishu_relay_pending_queue_depth gauge",
+            f"feishu_relay_pending_queue_depth {pending_queue_depth}",
+            "# TYPE feishu_relay_permanent_failure_depth gauge",
+            f"feishu_relay_permanent_failure_depth {permanent_failure_depth}",
             "# TYPE feishu_relay_last_success_timestamp_seconds gauge",
             f"feishu_relay_last_success_timestamp_seconds {self.last_success}",
+            "# TYPE feishu_relay_last_transport_accepted_timestamp_seconds gauge",
+            "feishu_relay_last_transport_accepted_timestamp_seconds "
+            f"{self.last_transport_accepted}",
             "",
         ]
         return "\n".join(lines).encode()
@@ -232,12 +441,18 @@ class DeliveryWorker(threading.Thread):
         gateway_url: str,
         hmac_secret: str,
         metrics: RelayMetrics,
+        ledger: DeliveryLedger | None = None,
+        max_attempts: int = 5,
     ) -> None:
         super().__init__(name="gateway-delivery", daemon=True)
         self.queue = queue
         self.gateway_url = gateway_url
         self.hmac_secret = hmac_secret
         self.metrics = metrics
+        self.ledger = ledger
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be positive")
+        self.max_attempts = max_attempts
 
     def run(self) -> None:
         while True:
@@ -246,6 +461,11 @@ class DeliveryWorker(threading.Thread):
             time.sleep(2)
 
     def _deliver(self, path: Path, item: QueueItem) -> None:
+        source = item.notification.get("source")
+        source_name = source if isinstance(source, str) and source else "unknown"
+        attempt = item.attempts + 1
+        if self.ledger is not None:
+            self.ledger.record_attempt(item.event_id, source_name)
         body = json.dumps(item.notification, ensure_ascii=False, separators=(",", ":")).encode()
         timestamp = str(int(time.time()))
         signature = sign_request(self.hmac_secret, timestamp, item.event_id, body)
@@ -260,34 +480,66 @@ class DeliveryWorker(threading.Thread):
                 "X-Signature": signature,
             },
         )
+        success = False
+        retryable = True
+        error_code = "GATEWAY_UNAVAILABLE"
         try:
             with urllib.request.urlopen(request, timeout=10) as response:
                 success = 200 <= response.status < 300
-        except (OSError, urllib.error.URLError):
-            success = False
+                if not success:
+                    error_code = f"HTTP_{response.status}"
+                    retryable = response.status in RETRYABLE_HTTP_STATUSES
+        except urllib.error.HTTPError as exc:
+            error_code = f"HTTP_{exc.code}"
+            retryable = exc.code in RETRYABLE_HTTP_STATUSES
+        except (OSError, urllib.error.URLError, TimeoutError):
+            retryable = True
         if success:
+            if self.ledger is not None:
+                self.ledger.mark_transport_accepted(item.event_id)
             self.queue.acknowledged(path)
             self.metrics.delivered += 1
+            self.metrics.attempts += 1
             self.metrics.last_success = int(time.time())
+            self.metrics.last_transport_accepted = self.metrics.last_success
             logger.info(
                 "gateway delivery succeeded",
-                extra={"event": "relay_delivery", "result": "success"},
+                extra={
+                    "event": "relay_delivery",
+                    "result": "transport_accepted",
+                    "attempt": attempt,
+                },
             )
             return
-        self.queue.failed(path, item)
+        self.metrics.attempts += 1
         self.metrics.failed += 1
+        permanent = not retryable or attempt >= self.max_attempts
+        self.queue.failed(path, item, error_code=error_code, permanent=permanent)
+        if self.ledger is not None:
+            if permanent:
+                self.ledger.mark_permanent_failed(item.event_id, error_code)
+            else:
+                self.ledger.mark_retrying(item.event_id, error_code, item.next_attempt_at)
+        if permanent:
+            self.metrics.permanent_failures += 1
+            result = "permanent_failure"
+        else:
+            self.metrics.retryable_failures += 1
+            result = "retryable_failure"
         logger.warning(
             "gateway delivery failed",
             extra={
                 "event": "relay_delivery",
-                "result": "error",
-                "attempt": item.attempts,
-                "error_code": "GATEWAY_UNAVAILABLE",
+                "result": result,
+                "attempt": attempt,
+                "error_code": error_code,
             },
         )
 
 
-def handler_factory(queue: DurableQueue, metrics: RelayMetrics) -> type[BaseHTTPRequestHandler]:
+def handler_factory(
+    queue: DurableQueue, metrics: RelayMetrics, ledger: DeliveryLedger | None = None
+) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
             length_text = self.headers.get("Content-Length", "0")
@@ -307,15 +559,24 @@ def handler_factory(queue: DurableQueue, metrics: RelayMetrics) -> type[BaseHTTP
                 self.send_response(202)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(b'{"status":"ignored"}\n')
+                self.wfile.write(
+                    json.dumps({"status": "ignored", "event_id": event_id}).encode() + b"\n"
+                )
                 return
             inserted = queue.enqueue(event_id, notification)
             if not inserted:
                 metrics.duplicates += 1
+            elif ledger is not None:
+                source = notification.get("source")
+                ledger.record_queued(
+                    event_id, source if isinstance(source, str) and source else "unknown"
+                )
             self.send_response(202)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(b'{"status":"accepted"}\n')
+            self.wfile.write(
+                json.dumps({"status": "accepted", "event_id": event_id}).encode() + b"\n"
+            )
 
         def do_GET(self) -> None:
             path = urlparse(self.path).path
@@ -323,7 +584,9 @@ def handler_factory(queue: DurableQueue, metrics: RelayMetrics) -> type[BaseHTTP
                 body = b'{"status":"ok"}\n'
                 content_type = "application/json"
             elif path == "/metrics":
-                body = metrics.render(queue.depth())
+                body = metrics.render(
+                    queue.depth(), queue.pending_depth(), queue.permanent_failure_depth()
+                )
                 content_type = "text/plain; version=0.0.4"
             else:
                 self.send_error(404)
@@ -342,6 +605,10 @@ def handler_factory(queue: DurableQueue, metrics: RelayMetrics) -> type[BaseHTTP
 def main() -> None:
     configure_logging()
     queue = DurableQueue(Path(os.getenv("RELAY_QUEUE_DIR", "/srv/webhook-relay/queue")))
+    ledger = DeliveryLedger(
+        Path(os.getenv("RELAY_LEDGER_PATH", str(queue.directory.parent / "delivery-ledger.db")))
+    )
+    ledger.prune(int(os.getenv("RELAY_LEDGER_RETENTION_SECONDS", "604800")))
     metrics = RelayMetrics()
     secret = read_secret(
         Path(os.getenv("RELAY_HMAC_SECRET_FILE", "/etc/feishu-relay/notification_hmac_key"))
@@ -354,11 +621,13 @@ def main() -> None:
         ),
         secret,
         metrics,
+        ledger,
+        max_attempts=int(os.getenv("RELAY_MAX_ATTEMPTS", "5")),
     )
     worker.start()
     server = ThreadingHTTPServer(
         (os.getenv("RELAY_BIND_HOST", "172.24.0.1"), int(os.getenv("RELAY_PORT", "9090"))),
-        handler_factory(queue, metrics),
+        handler_factory(queue, metrics, ledger),
     )
     logger.info("relay started", extra={"event": "relay_started", "result": "success"})
     server.serve_forever()

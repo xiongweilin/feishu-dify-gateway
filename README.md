@@ -31,6 +31,9 @@ Task execution and repair governance belong to `xiongweilin/control-plane`. This
 - Control-plane approval callbacks use the `X-Control-Plane-Key` shared-key header; `CONTROL_PLANE_BASE_URL` points to the Windows host `http://host.docker.internal:18083`.
 - Feishu responses are always validated as untrusted external input.
 - The idempotency store keeps only event ids, status, and time — never message bodies.
+- Notification delivery has a metadata-only ledger. `transport_accepted` means the next transport endpoint accepted the request; `delivery_confirmed` means the Feishu provider returned success. Neither state asserts that a human read the message.
+- `POST /v1/notifications/synthetic/prepare` is an internal, local-only dry-run entry. It creates a `prepared` audit record and explicitly never invokes an external sender. There is no automatic synthetic send path.
+- `GET /v1/notifications/synthetic/probe` is an internal, local-only capability probe. It never creates a ledger record and never invokes an external sender.
 
 ## Development
 
@@ -58,15 +61,20 @@ All files must be `600`, the directory `700`, owned by the dedicated in-containe
 
 The cloud webhook relay and watchdog reach restricted endpoints through the Tailscale network (`http://metratio.tail1f4641.ts.net:8082`, mapped as Tailscale TCP 8082 → host `127.0.0.1:18082` → container restricted `8083` listener, which hides the Alertmanager route): the relay owns persistent queuing and retry delivery for external webhooks (`/v1/notifications`). The watchdog continues readiness checks, while its cloud systemd unit currently sets `WATCHDOG_EMAIL_ENABLED=false` to suppress outbound QQ SMTP mail; the flag is reversible and the SMTP secret files remain outside Git. Cloud deployment and secret entry: see `deploy/cloud/` (relay/watchdog systemd units and `install-cloud-secrets.sh`).
 
+The relay keeps a separate metadata-only delivery ledger keyed by the same event id. Its `queued` → `retrying` → `transport_accepted` path describes relay-to-gateway handoff; `permanent_failed` is terminal after a non-retryable response or the bounded attempt budget. The gateway ledger records the downstream `delivery_confirmed` state. Ledger records never contain notification bodies or provider response bodies.
+
 ## Internal interfaces
 
 - `POST /v1/alerts/alertmanager`
 - `POST /v1/notifications`
+- `POST /v1/notifications/synthetic/prepare` (internal listener only; dry-run preparation, no external send)
+- `GET /v1/notifications/synthetic/probe` (internal listener only; capability probe, no external send)
+- `GET /v1/delivery-ledger/{event_id}` (internal listener only; metadata-only audit view)
 - `GET /healthz`
 - `GET /readyz`
 - `GET /metrics`
 
-Inside the container, `8082` is the internal interface used only on `shared-net`; the host `127.0.0.1:18082` maps only to the restricted `8083` listener, which hides the Alertmanager route.
+Inside the container, `8082` is the internal interface. Compose maps it only to host loopback `127.0.0.1:18084` for local prepare/probe/ledger checks; cloud traffic remains on `127.0.0.1:18082` → restricted `8083`, which hides the Alertmanager and synthetic routes. Use `docker compose build --no-cache feishu-dify-gateway` followed by `docker compose up -d --force-recreate feishu-dify-gateway` after source changes; `pull_policy: build` keeps later `docker compose up` runs aligned with the worktree.
 
 Errors are unified as:
 
@@ -74,4 +82,4 @@ Errors are unified as:
 {"error":{"code":"ERROR_CODE","message":"Safe explanation"}}
 ```
 
-Detailed decisions: [ADR-001](docs/decisions/0001-use-feishu-long-connection-and-dify.md) (long connection) and [ADR-002](docs/decisions/0002-dispatch-messages-to-control-plane-codex.md) (dispatch messages to Codex, removed the Dify Chatflow).
+Detailed decisions: [ADR-001](docs/decisions/0001-use-feishu-long-connection-and-dify.md) (long connection), [ADR-002](docs/decisions/0002-dispatch-messages-to-control-plane-codex.md) (dispatch messages to Codex, removed the Dify Chatflow), and [ADR-004](docs/decisions/0004-notification-delivery-ledger.md) (delivery ledger and dry-run synthetic path).

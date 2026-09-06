@@ -6,6 +6,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from typing import Literal, cast
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -20,9 +21,13 @@ from .metrics import Metrics
 from .models import (
     AcceptedResponse,
     AlertmanagerPayload,
+    DeliveryLedgerResponse,
     ErrorDetail,
     ErrorResponse,
     Notification,
+    NotificationAcceptedResponse,
+    SyntheticPrepareResponse,
+    SyntheticProbeResponse,
 )
 from .security import SignatureError, verify_request
 from .service import GatewayService
@@ -87,8 +92,16 @@ def create_app(
         request_id = request_id or uuid.uuid4().hex
         started = time.perf_counter()
         server = request.scope.get("server")
-        local_port = server[1] if isinstance(server, tuple) and len(server) == 2 else None
-        if request.url.path == "/v1/alerts/alertmanager" and local_port != settings.port:
+        local_port = (
+            server[1]
+            if isinstance(server, (tuple, list)) and len(server) == 2
+            else None
+        )
+        internal_only = request.url.path == "/v1/alerts/alertmanager" or (
+            request.url.path.startswith("/v1/notifications/synthetic")
+            or request.url.path.startswith("/v1/delivery-ledger/")
+        )
+        if internal_only and local_port != settings.port:
             blocked_response = error_response("NOT_FOUND", "Resource not found", 404)
             blocked_response.headers["X-Request-ID"] = request_id
             return blocked_response
@@ -153,8 +166,8 @@ def create_app(
     async def alertmanager(payload: AlertmanagerPayload) -> AcceptedResponse:
         return await gateway.deliver_alerts(payload)
 
-    @app.post("/v1/notifications", response_model=AcceptedResponse, status_code=202)
-    async def notifications(request: Request) -> AcceptedResponse | JSONResponse:
+    @app.post("/v1/notifications", response_model=NotificationAcceptedResponse, status_code=202)
+    async def notifications(request: Request) -> NotificationAcceptedResponse | JSONResponse:
         body = await request.body()
         event_id = request.headers.get("X-Event-ID", "")
         timestamp = request.headers.get("X-Timestamp", "")
@@ -175,5 +188,52 @@ def create_app(
         except ValidationError:
             return error_response("VALIDATION_ERROR", "Request validation failed", 422)
         return await gateway.deliver_notification(event_id, notification)
+
+    @app.post(
+        "/v1/notifications/synthetic/prepare",
+        response_model=SyntheticPrepareResponse,
+        status_code=201,
+    )
+    async def prepare_synthetic_notification() -> SyntheticPrepareResponse:
+        return gateway.prepare_synthetic_notification()
+
+    @app.get(
+        "/v1/notifications/synthetic/probe",
+        response_model=SyntheticProbeResponse,
+    )
+    async def probe_synthetic_notification() -> SyntheticProbeResponse:
+        return gateway.probe_synthetic_notification()
+
+    @app.get("/v1/delivery-ledger/{event_id}", response_model=DeliveryLedgerResponse)
+    async def delivery_ledger(event_id: str) -> DeliveryLedgerResponse | JSONResponse:
+        entry = gateway.delivery_ledger(event_id)
+        if entry is None:
+            return error_response("NOT_FOUND", "Delivery ledger entry not found", 404)
+        return DeliveryLedgerResponse(
+            eventId=entry.event_id,
+            source=entry.source,
+            status=cast(
+                Literal[
+                    "prepared",
+                    "delivering",
+                    "retrying",
+                    "permanent_failed",
+                    "transport_accepted",
+                    "delivery_confirmed",
+                ],
+                entry.status,
+            ),
+            transportAccepted=entry.transport_accepted,
+            deliveryConfirmed=entry.delivery_confirmed,
+            attempts=entry.attempts,
+            lastErrorCode=entry.last_error_code,
+            createdAt=entry.created_at,
+            updatedAt=entry.updated_at,
+            transportAcceptedAt=entry.transport_accepted_at,
+            deliveryConfirmedAt=entry.delivery_confirmed_at,
+            nextRetryAt=entry.next_retry_at,
+            terminalAt=entry.terminal_at,
+            synthetic=entry.synthetic,
+        )
 
     return app

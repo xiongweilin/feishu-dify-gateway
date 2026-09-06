@@ -6,7 +6,7 @@ import logging
 import time
 import uuid
 from collections.abc import Awaitable
-from typing import Protocol
+from typing import Literal, Protocol, cast
 
 import httpx
 
@@ -14,13 +14,22 @@ from .config import Settings
 from .errors import GatewayError
 from .feishu import FeishuSender
 from .metrics import Metrics
-from .models import AcceptedResponse, Alert, AlertmanagerPayload, Notification
+from .models import (
+    AcceptedResponse,
+    Alert,
+    AlertmanagerPayload,
+    Notification,
+    NotificationAcceptedResponse,
+    SyntheticPrepareResponse,
+    SyntheticProbeResponse,
+)
 from .prometheus import PrometheusClient
 from .security import pseudonymous_user
-from .store import StateStore
+from .store import DeliveryLedgerEntry, StateStore
 
 logger = logging.getLogger(__name__)
 FEISHU_DELIVERY_NAMESPACE = uuid.UUID("589e9076-153c-40de-8751-b2469ea1af41")
+RETRYABLE_DELIVERY_STATUS_CODES = frozenset({408, 425, 429, 500, 502, 503, 504})
 
 
 class ControlPlaneClient:
@@ -140,11 +149,40 @@ class GatewayService:
 
     async def deliver_notification(
         self, event_id: str, notification: Notification
-    ) -> AcceptedResponse:
-        if not self.store.claim_event(f"notification:{event_id}"):
-            self.metrics.deliveries.labels(notification.source, "deduplicated").inc()
-            return AcceptedResponse(accepted=0, deduplicated=1)
+    ) -> NotificationAcceptedResponse:
         key = f"notification:{event_id}"
+        if not self.store.claim_event(key):
+            entry = self.store.delivery_for(event_id)
+            self.metrics.deliveries.labels(notification.source, "deduplicated").inc()
+            self.metrics.delivery_states.labels(notification.source, "deduplicated").inc()
+            status = cast(
+                Literal[
+                    "deduplicated",
+                    "delivering",
+                    "retrying",
+                    "permanent_failed",
+                    "delivery_confirmed",
+                ],
+                (
+                    entry.status
+                    if entry is not None
+                    and entry.status
+                    in {"delivering", "retrying", "permanent_failed", "delivery_confirmed"}
+                    else "deduplicated"
+                ),
+            )
+            return NotificationAcceptedResponse(
+                accepted=0,
+                deduplicated=1,
+                event_id=event_id,
+                status=status,
+                transportAccepted=entry.transport_accepted if entry else False,
+                deliveryConfirmed=entry.delivery_confirmed if entry else False,
+            )
+        self.store.begin_delivery(event_id, notification.source)
+        self.metrics.delivery_states.labels(notification.source, "transport_accepted").inc()
+        self.metrics.delivery_states.labels(notification.source, "delivering").inc()
+        self.metrics.delivery_attempts.labels(notification.source, "attempt").inc()
         message = f"[{notification.severity.upper()}] {notification.title}\n{notification.text}"
         if notification.url is not None:
             message += f"\n{notification.url}"
@@ -152,12 +190,29 @@ class GatewayService:
             await self._send_chunks(
                 self.settings.feishu_alert_recipient_open_id, message, key
             )
-        except Exception:
-            self.store.release_event(key)
+        except Exception as exc:
+            error_code, retryable = self._delivery_failure(exc)
+            if retryable:
+                self.store.mark_delivery_retrying(event_id, error_code, int(time.time()))
+                self.metrics.delivery_states.labels(notification.source, "retrying").inc()
+                self.metrics.delivery_attempts.labels(
+                    notification.source, "retryable_failure"
+                ).inc()
+                self.store.release_event(key)
+            else:
+                self.store.mark_delivery_permanent_failed(event_id, error_code)
+                self.store.mark_processed(key, status="permanent_failed")
+                self.metrics.delivery_states.labels(notification.source, "permanent_failed").inc()
+                self.metrics.delivery_attempts.labels(
+                    notification.source, "permanent_failure"
+                ).inc()
             self.metrics.deliveries.labels(notification.source, "error").inc()
             raise
+        self.store.mark_delivery_confirmed(event_id)
         self.store.mark_processed(key)
         self.metrics.deliveries.labels(notification.source, "success").inc()
+        self.metrics.delivery_states.labels(notification.source, "delivery_confirmed").inc()
+        self.metrics.delivery_attempts.labels(notification.source, "confirmed").inc()
         self.metrics.last_success.labels("notification").set(time.time())
         logger.info(
             "notification delivered",
@@ -167,7 +222,14 @@ class GatewayService:
                 "result": "success",
             },
         )
-        return AcceptedResponse(accepted=1, deduplicated=0)
+        return NotificationAcceptedResponse(
+            accepted=1,
+            deduplicated=0,
+            event_id=event_id,
+            status="delivery_confirmed",
+            transportAccepted=True,
+            deliveryConfirmed=True,
+        )
 
     async def deliver_alerts(self, payload: AlertmanagerPayload) -> AcceptedResponse:
         accepted = 0
@@ -177,23 +239,83 @@ class GatewayService:
             if not self.store.claim_event(key):
                 deduplicated += 1
                 self.metrics.deliveries.labels("alertmanager", "deduplicated").inc()
+                self.metrics.delivery_states.labels("alertmanager", "deduplicated").inc()
                 continue
+            self.store.begin_delivery(key, "alertmanager")
+            self.metrics.delivery_states.labels("alertmanager", "transport_accepted").inc()
+            self.metrics.delivery_states.labels("alertmanager", "delivering").inc()
+            self.metrics.delivery_attempts.labels("alertmanager", "attempt").inc()
             try:
                 await self._send_chunks(
                     self.settings.feishu_alert_recipient_open_id,
                     self._format_alert(alert),
                     key,
                 )
-            except Exception:
-                self.store.release_event(key)
+            except Exception as exc:
+                error_code, retryable = self._delivery_failure(exc)
+                if retryable:
+                    self.store.mark_delivery_retrying(key, error_code, int(time.time()))
+                    self.metrics.delivery_states.labels("alertmanager", "retrying").inc()
+                    self.metrics.delivery_attempts.labels(
+                        "alertmanager", "retryable_failure"
+                    ).inc()
+                    self.store.release_event(key)
+                else:
+                    self.store.mark_delivery_permanent_failed(key, error_code)
+                    self.store.mark_processed(key, status="permanent_failed")
+                    self.metrics.delivery_states.labels(
+                        "alertmanager", "permanent_failed"
+                    ).inc()
+                    self.metrics.delivery_attempts.labels(
+                        "alertmanager", "permanent_failure"
+                    ).inc()
                 self.metrics.deliveries.labels("alertmanager", "error").inc()
                 raise
+            self.store.mark_delivery_confirmed(key)
             self.store.mark_processed(key)
             accepted += 1
             self.metrics.deliveries.labels("alertmanager", "success").inc()
+            self.metrics.delivery_states.labels("alertmanager", "delivery_confirmed").inc()
+            self.metrics.delivery_attempts.labels("alertmanager", "confirmed").inc()
         if accepted:
             self.metrics.last_success.labels("alertmanager").set(time.time())
         return AcceptedResponse(accepted=accepted, deduplicated=deduplicated)
+
+    @staticmethod
+    def _delivery_failure(exc: Exception) -> tuple[str, bool]:
+        if isinstance(exc, GatewayError):
+            return exc.code, exc.status_code in RETRYABLE_DELIVERY_STATUS_CODES
+        return "UNEXPECTED_DELIVERY_ERROR", True
+
+    def prepare_synthetic_notification(self) -> SyntheticPrepareResponse:
+        event_id = f"synthetic-{uuid.uuid4().hex}"
+        entry = self.store.prepare_synthetic_delivery(event_id)
+        self.metrics.synthetic_prepares.labels("prepared").inc()
+        self.metrics.delivery_states.labels("test", "prepared").inc()
+        logger.info(
+            "synthetic notification prepared",
+            extra={"event": "synthetic_notification_prepared", "source": "test"},
+        )
+        return SyntheticPrepareResponse(
+            eventId=entry.event_id,
+            status="prepared",
+            transportAccepted=entry.transport_accepted,
+            deliveryConfirmed=entry.delivery_confirmed,
+            externalSendStarted=False,
+            requiresManualConfirmation=True,
+        )
+
+    def probe_synthetic_notification(self) -> SyntheticProbeResponse:
+        self.metrics.synthetic_probes.labels("ready").inc()
+        return SyntheticProbeResponse(
+            status="ready",
+            syntheticEnabled=True,
+            externalSendStarted=False,
+            requiresManualConfirmation=True,
+        )
+
+    def delivery_ledger(self, event_id: str) -> DeliveryLedgerEntry | None:
+        return self.store.delivery_for(event_id)
 
     @staticmethod
     def _alert_key(alert: Alert) -> str:
