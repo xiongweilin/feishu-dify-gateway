@@ -54,6 +54,67 @@ class AcceptedResponse(BaseModel):
     deduplicated: int
 
 
+class NotificationAcceptedResponse(AcceptedResponse):
+    event_id: str
+    status: Literal[
+        "deduplicated",
+        "delivering",
+        "retrying",
+        "permanent_failed",
+        "delivery_confirmed",
+    ]
+    transport_accepted: bool = Field(alias="transportAccepted")
+    delivery_confirmed: bool = Field(alias="deliveryConfirmed")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SyntheticPrepareResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    event_id: str = Field(alias="eventId")
+    status: Literal["prepared"]
+    transport_accepted: bool = Field(alias="transportAccepted")
+    delivery_confirmed: bool = Field(alias="deliveryConfirmed")
+    external_send_started: bool = Field(alias="externalSendStarted")
+    requires_manual_confirmation: bool = Field(alias="requiresManualConfirmation")
+
+
+class SyntheticProbeResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    status: Literal["ready"]
+    synthetic_enabled: bool = Field(alias="syntheticEnabled")
+    external_send_started: bool = Field(alias="externalSendStarted")
+    requires_manual_confirmation: bool = Field(alias="requiresManualConfirmation")
+
+
+class DeliveryLedgerResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    event_id: str = Field(alias="eventId")
+    source: str
+    status: Literal[
+        "prepared",
+        "delivering",
+        "retrying",
+        "permanent_failed",
+        "transport_accepted",
+        "delivery_confirmed",
+    ]
+    transport_accepted: bool = Field(alias="transportAccepted")
+    delivery_confirmed: bool = Field(alias="deliveryConfirmed")
+    attempts: int
+    last_error_code: str = Field(alias="lastErrorCode")
+    created_at: int = Field(alias="createdAt")
+    updated_at: int = Field(alias="updatedAt")
+    transport_accepted_at: int | None = Field(default=None, alias="transportAcceptedAt")
+    delivery_confirmed_at: int | None = Field(default=None, alias="deliveryConfirmedAt")
+    next_retry_at: int | None = Field(default=None, alias="nextRetryAt")
+    terminal_at: int | None = Field(default=None, alias="terminalAt")
+    synthetic: bool
+
+
 class FeishuTokenResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
 
 
+def _provider_status_code(status_code: int) -> int:
+    return status_code if status_code >= 400 else 422
+
+
 class FeishuSender:
     def __init__(
         self,
@@ -87,10 +91,16 @@ class FeishuSender:
                     parsed = FeishuTokenResponse.model_validate(response.json())
                 except (httpx.HTTPError, ValueError, ValidationError) as exc:
                     raise GatewayError(
-                        "FEISHU_AUTH_FAILED", "Feishu authentication failed"
+                        "FEISHU_AUTH_FAILED",
+                        "Feishu authentication failed",
+                        status_code=_provider_status_code(response.status_code),
                     ) from exc
                 if parsed.code != 0 or not parsed.tenant_access_token:
-                    raise GatewayError("FEISHU_AUTH_FAILED", "Feishu authentication failed")
+                    raise GatewayError(
+                        "FEISHU_AUTH_FAILED",
+                        "Feishu authentication failed",
+                        status_code=_provider_status_code(response.status_code),
+                    )
                 self._token = parsed.tenant_access_token
                 self._token_expires_at = time.time() + max(60, parsed.expire - 60)
                 return self._token
@@ -136,10 +146,16 @@ class FeishuSender:
                     parsed = FeishuMessageResponse.model_validate(response.json())
                 except (httpx.HTTPError, ValueError, ValidationError) as exc:
                     raise GatewayError(
-                        "FEISHU_SEND_FAILED", "Feishu message delivery failed"
+                        "FEISHU_SEND_FAILED",
+                        "Feishu message delivery failed",
+                        status_code=_provider_status_code(response.status_code),
                     ) from exc
                 if parsed.code != 0:
-                    raise GatewayError("FEISHU_SEND_FAILED", "Feishu rejected the message")
+                    raise GatewayError(
+                        "FEISHU_SEND_FAILED",
+                        "Feishu rejected the message",
+                        status_code=_provider_status_code(response.status_code),
+                    )
                 last_error = None
                 break
             if last_error is not None and attempt + 1 == self._max_attempts:

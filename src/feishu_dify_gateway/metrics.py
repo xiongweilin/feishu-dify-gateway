@@ -25,6 +25,30 @@ class Metrics:
             ("source", "result"),
             registry=self.registry,
         )
+        self.delivery_states = Counter(
+            "feishu_gateway_delivery_states_total",
+            "Notification delivery ledger state transitions",
+            ("source", "state"),
+            registry=self.registry,
+        )
+        self.delivery_attempts = Counter(
+            "feishu_gateway_delivery_attempts_total",
+            "Notification delivery attempts and outcomes",
+            ("source", "result"),
+            registry=self.registry,
+        )
+        self.synthetic_prepares = Counter(
+            "feishu_gateway_synthetic_prepares_total",
+            "Local-only synthetic notification preparations",
+            ("result",),
+            registry=self.registry,
+        )
+        self.synthetic_probes = Counter(
+            "feishu_gateway_synthetic_probes_total",
+            "Local-only synthetic notification probes",
+            ("result",),
+            registry=self.registry,
+        )
         self.external_requests = Counter(
             "feishu_gateway_external_requests_total",
             "External dependency outcomes",
