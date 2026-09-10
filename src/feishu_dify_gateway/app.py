@@ -76,6 +76,11 @@ def create_app(
                     if administrative_ingress is not None
                     else None
                 ),
+                administrative_route_prefix=(
+                    settings.administrative_route_prefix
+                    if administrative_ingress is not None
+                    else ""
+                ),
             )
             connection.start(asyncio.get_running_loop())
         yield

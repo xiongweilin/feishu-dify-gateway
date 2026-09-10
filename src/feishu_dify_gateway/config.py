@@ -34,6 +34,13 @@ def _env_bool(name: str, default: bool) -> bool:
     raise ConfigurationError(f"Invalid boolean environment variable: {name}")
 
 
+def _route_prefix(name: str, default: str) -> str:
+    value = os.getenv(name, default).strip()
+    if value and (not value.startswith("/") or any(char.isspace() for char in value)):
+        raise ConfigurationError(f"Invalid route prefix environment variable: {name}")
+    return value.rstrip("/")
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     feishu_app_id: str
@@ -47,6 +54,7 @@ class Settings:
     prometheus_base_url: str = "http://prometheus:9090"
     control_plane_base_url: str = "http://host.docker.internal:18083"
     administrative_ingress_base_url: str = ""
+    administrative_route_prefix: str = ""
     feishu_base_url: str = "https://open.feishu.cn"
     host: str = "0.0.0.0"
     port: int = 8082
@@ -73,6 +81,9 @@ class Settings:
                 "CONTROL_PLANE_BASE_URL", "http://host.docker.internal:18083"
             ),
             administrative_ingress_base_url=os.getenv("ADMINISTRATIVE_INGRESS_BASE_URL", ""),
+            administrative_route_prefix=_route_prefix(
+                "ADMINISTRATIVE_ROUTE_PREFIX", "/admin"
+            ),
             feishu_base_url=os.getenv("FEISHU_BASE_URL", "https://open.feishu.cn"),
             host=os.getenv("GATEWAY_HOST", "0.0.0.0"),
             port=int(os.getenv("GATEWAY_PORT", "8082")),

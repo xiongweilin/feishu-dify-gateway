@@ -14,6 +14,7 @@ from feishu_dify_gateway.feishu import (
     FeishuLongConnection,
     FeishuSender,
     extract_feishu_event_metadata,
+    is_administrative_route,
 )
 from feishu_dify_gateway.metrics import Metrics
 
@@ -288,3 +289,10 @@ async def test_long_connection_forwards_non_text_metadata_without_reading_body(
     assert received[0].event_id == "event-file"
     assert received[0].message_type == "file"
     assert "content" not in json.dumps(received[0].provider_envelope())
+
+
+def test_administrative_route_prefix_is_transport_only() -> None:
+    assert is_administrative_route("/admin onboard employee:1", "/admin")
+    assert is_administrative_route("  /admin  ", "/admin")
+    assert not is_administrative_route("/administrator onboard employee:1", "/admin")
+    assert not is_administrative_route("onboard employee:1", "/admin")
