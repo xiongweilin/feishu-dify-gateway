@@ -56,7 +56,10 @@ def create_app(
     enable_ws = settings.ws_enabled if start_long_connection is None else start_long_connection
     connection: FeishuLongConnection | None = None
     administrative_ingress = (
-        AdministrativeIngressClient(settings.administrative_ingress_base_url)
+        AdministrativeIngressClient(
+            settings.administrative_ingress_base_url,
+            shared_secret=settings.administrative_ingress_shared_secret,
+        )
         if settings.administrative_ingress_base_url.strip()
         else None
     )

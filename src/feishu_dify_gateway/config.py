@@ -10,16 +10,19 @@ class ConfigurationError(RuntimeError):
     """Raised when runtime configuration is missing or unsafe."""
 
 
-def _read_secret(directory: Path, name: str) -> str:
-    path = directory / name
+def _read_secret_path(path: Path, label: str) -> str:
     if not path.is_file() or path.is_symlink():
-        raise ConfigurationError(f"Required secret file is missing or unsafe: {name}")
+        raise ConfigurationError(f"Required secret file is missing or unsafe: {label}")
     if os.name != "nt" and stat.S_IMODE(path.stat().st_mode) & 0o077:
-        raise ConfigurationError(f"Secret file permissions must be 600: {name}")
+        raise ConfigurationError(f"Secret file permissions must be 600: {label}")
     value = path.read_text(encoding="utf-8").strip()
     if not value:
-        raise ConfigurationError(f"Required secret file is empty: {name}")
+        raise ConfigurationError(f"Required secret file is empty: {label}")
     return value
+
+
+def _read_secret(directory: Path, name: str) -> str:
+    return _read_secret_path(directory / name, name)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -54,6 +57,7 @@ class Settings:
     prometheus_base_url: str = "http://prometheus:9090"
     control_plane_base_url: str = "http://host.docker.internal:18083"
     administrative_ingress_base_url: str = ""
+    administrative_ingress_shared_secret: str = ""
     administrative_route_prefix: str = ""
     feishu_base_url: str = "https://open.feishu.cn"
     host: str = "0.0.0.0"
@@ -67,6 +71,12 @@ class Settings:
     def from_environment(cls) -> Settings:
         secrets_dir = Path(os.getenv("GATEWAY_SECRETS_DIR", "/run/secrets"))
         user_open_id = _read_secret(secrets_dir, "feishu_user_open_id")
+        shared_secret_file = os.getenv("ADMINISTRATIVE_INGRESS_SHARED_SECRET_FILE", "").strip()
+        shared_secret = (
+            _read_secret_path(Path(shared_secret_file), "administrative ingress shared secret")
+            if shared_secret_file
+            else os.getenv("ADMINISTRATIVE_INGRESS_SHARED_SECRET", "")
+        )
         return cls(
             feishu_app_id=_read_secret(secrets_dir, "feishu_app_id"),
             feishu_app_secret=_read_secret(secrets_dir, "feishu_app_secret"),
@@ -81,6 +91,7 @@ class Settings:
                 "CONTROL_PLANE_BASE_URL", "http://host.docker.internal:18083"
             ),
             administrative_ingress_base_url=os.getenv("ADMINISTRATIVE_INGRESS_BASE_URL", ""),
+            administrative_ingress_shared_secret=shared_secret,
             administrative_route_prefix=_route_prefix(
                 "ADMINISTRATIVE_ROUTE_PREFIX", "/admin"
             ),
