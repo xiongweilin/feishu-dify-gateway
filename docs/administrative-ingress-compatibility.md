@@ -6,6 +6,17 @@ set both `ADMINISTRATIVE_INGRESS_BASE_URL` and
 `ADMINISTRATIVE_INGRESS_SHARED_SECRET` to enable it. The target path is
 `/v1/intake/feishu/events`.
 
+## Routing exclusivity
+
+A single Feishu event enters at most one execution system:
+
+| Event | Route |
+|---|---|
+| text starting with `ADMINISTRATIVE_ROUTE_PREFIX` | Administrative metadata-only handoff |
+| other text | control-plane task dispatch |
+| non-text (for example file/image) with ingress enabled | Administrative metadata-only handoff; never control-plane. The gateway does not parse the attachment body. |
+| non-text with ingress disabled | not dispatched |
+
 ## Field mapping
 
 The official Lark SDK event provides the following fields without needing to
