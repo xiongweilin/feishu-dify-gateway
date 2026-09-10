@@ -46,6 +46,7 @@ class Settings:
     state_db: Path
     prometheus_base_url: str = "http://prometheus:9090"
     control_plane_base_url: str = "http://host.docker.internal:18083"
+    administrative_ingress_base_url: str = ""
     feishu_base_url: str = "https://open.feishu.cn"
     host: str = "0.0.0.0"
     port: int = 8082
@@ -71,6 +72,7 @@ class Settings:
             control_plane_base_url=os.getenv(
                 "CONTROL_PLANE_BASE_URL", "http://host.docker.internal:18083"
             ),
+            administrative_ingress_base_url=os.getenv("ADMINISTRATIVE_INGRESS_BASE_URL", ""),
             feishu_base_url=os.getenv("FEISHU_BASE_URL", "https://open.feishu.cn"),
             host=os.getenv("GATEWAY_HOST", "0.0.0.0"),
             port=int(os.getenv("GATEWAY_PORT", "8082")),

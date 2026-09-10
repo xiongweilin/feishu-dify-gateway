@@ -8,7 +8,9 @@ import threading
 import time
 from collections.abc import Awaitable, Callable
 from concurrent.futures import Future
+from dataclasses import dataclass
 from time import perf_counter
+from typing import Any
 
 import httpx
 from pydantic import ValidationError
@@ -19,6 +21,7 @@ from .models import FeishuMessageResponse, FeishuTokenResponse
 
 logger = logging.getLogger(__name__)
 RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
+ADMINISTRATIVE_INGRESS_PATH = "/v1/intake/feishu/events"
 
 
 def _provider_status_code(status_code: int) -> int:
@@ -180,6 +183,188 @@ class FeishuSender:
         await self._client.aclose()
 
 
+@dataclass(frozen=True, slots=True)
+class FeishuEventMetadata:
+    """Body-free metadata extracted from one trusted long-connection event."""
+
+    event_id: str
+    event_type: str
+    tenant_key: str
+    message_id: str
+    root_id: str | None
+    parent_id: str | None
+    thread_id: str | None
+    sender_open_id: str
+    create_time: str
+    verification_token: str | None
+    message_type: str
+
+    def provider_envelope(self) -> dict[str, object]:
+        """Rebuild only the metadata accepted by the administrative ingress."""
+        header: dict[str, object] = {
+            "event_id": self.event_id,
+            "event_type": self.event_type,
+            "tenant_key": self.tenant_key,
+            "create_time": self.create_time,
+        }
+        if self.verification_token:
+            header["token"] = self.verification_token
+
+        message: dict[str, object] = {
+            "message_id": self.message_id,
+            "create_time": self.create_time,
+            "message_type": self.message_type,
+        }
+        # The administrative adapter currently derives thread_ref from
+        # root_id/parent_id/message_id. Preserve SDK thread_id when root_id is
+        # absent without adding a new cross-repository contract.
+        if self.root_id or self.thread_id:
+            message["root_id"] = self.root_id or self.thread_id
+        if self.parent_id:
+            message["parent_id"] = self.parent_id
+        return {
+            "schema": "2.0",
+            "header": header,
+            "event": {
+                "sender": {"sender_id": {"open_id": self.sender_open_id}},
+                "message": message,
+            },
+        }
+
+
+def _nonblank_text(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _provider_time(value: object) -> str | None:
+    if isinstance(value, int) and value > 0:
+        return str(value)
+    text = _nonblank_text(value)
+    if text is None or not text.isascii() or not text.isdigit() or int(text) < 1:
+        return None
+    return text
+
+
+def extract_feishu_event_metadata(data: Any) -> FeishuEventMetadata | None:
+    """Extract the fields needed by the durable ingress without reading content."""
+    header = getattr(data, "header", None)
+    event = getattr(data, "event", None)
+    message = getattr(event, "message", None)
+    sender = getattr(event, "sender", None)
+    sender_id = getattr(sender, "sender_id", None)
+    if header is None or message is None or sender_id is None:
+        return None
+
+    event_id = _nonblank_text(getattr(header, "event_id", None))
+    message_id = _nonblank_text(getattr(message, "message_id", None))
+    tenant_key = _nonblank_text(getattr(header, "tenant_key", None)) or _nonblank_text(
+        getattr(sender, "tenant_key", None)
+    )
+    sender_open_id = _nonblank_text(getattr(sender_id, "open_id", None))
+    create_time = _provider_time(
+        getattr(message, "create_time", None) or getattr(header, "create_time", None)
+    )
+    if not event_id or not message_id or not tenant_key or not sender_open_id or not create_time:
+        return None
+
+    return FeishuEventMetadata(
+        event_id=event_id,
+        event_type=_nonblank_text(getattr(header, "event_type", None))
+        or "im.message.receive_v1",
+        tenant_key=tenant_key,
+        message_id=message_id,
+        root_id=_nonblank_text(getattr(message, "root_id", None)),
+        parent_id=_nonblank_text(getattr(message, "parent_id", None)),
+        thread_id=_nonblank_text(getattr(message, "thread_id", None)),
+        sender_open_id=sender_open_id,
+        create_time=create_time,
+        verification_token=_nonblank_text(getattr(header, "token", None)),
+        message_type=_nonblank_text(getattr(message, "message_type", None)) or "text",
+    )
+
+
+class AdministrativeIngressClient:
+    """Bounded, metadata-only handoff to the Administrative durable ingress."""
+
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        max_attempts: int = 3,
+        retry_base_seconds: float = 0.25,
+    ) -> None:
+        if not base_url.strip():
+            raise ValueError("base_url must not be blank")
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be positive")
+        self._base_url = base_url.rstrip("/")
+        self._max_attempts = max_attempts
+        self._retry_base_seconds = retry_base_seconds
+        self._client = httpx.AsyncClient(timeout=httpx.Timeout(10.0), transport=transport)
+
+    async def _retry_wait(self, attempt: int, response: httpx.Response | None = None) -> None:
+        delay = self._retry_base_seconds * (2**attempt)
+        if response is not None:
+            retry_after = response.headers.get("Retry-After")
+            if retry_after is not None:
+                with contextlib.suppress(ValueError):
+                    delay = float(retry_after)
+        await asyncio.sleep(max(0.0, min(delay, 10.0)))
+
+    async def send_metadata(self, metadata: FeishuEventMetadata) -> None:
+        # The current administrative boundary authenticates this compatibility
+        # path with the provider callback token. Never send an unverifiable
+        # reconstructed event.
+        if not metadata.verification_token:
+            raise GatewayError(
+                "ADMIN_INGRESS_AUTH_UNAVAILABLE",
+                "Administrative ingress authentication is unavailable",
+                503,
+            )
+
+        payload = metadata.provider_envelope()
+        last_error: Exception | None = None
+        for attempt in range(self._max_attempts):
+            try:
+                response = await self._client.post(
+                    f"{self._base_url}{ADMINISTRATIVE_INGRESS_PATH}",
+                    json=payload,
+                    headers={"Accept": "application/json"},
+                )
+            except httpx.RequestError as exc:
+                last_error = exc
+                if attempt + 1 < self._max_attempts:
+                    await self._retry_wait(attempt)
+                    continue
+                break
+
+            if response.status_code == 202:
+                return
+            if (
+                response.status_code in RETRYABLE_HTTP_STATUSES
+                and attempt + 1 < self._max_attempts
+            ):
+                await self._retry_wait(attempt, response)
+                continue
+            raise GatewayError(
+                "ADMIN_INGRESS_REJECTED",
+                "Administrative ingress rejected the event",
+                response.status_code if response.status_code >= 400 else 502,
+            )
+
+        raise GatewayError(
+            "ADMIN_INGRESS_UNAVAILABLE",
+            "Administrative ingress is unavailable",
+            503,
+        ) from last_error
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+
 class FeishuLongConnection:
     """Runs the official SDK long connection in a daemon thread."""
 
@@ -189,11 +374,13 @@ class FeishuLongConnection:
         app_secret: str,
         handler: Callable[[str, str, str], Awaitable[None]],
         metrics: Metrics,
+        metadata_handler: Callable[[FeishuEventMetadata], Awaitable[None]] | None = None,
     ) -> None:
         self._app_id = app_id
         self._app_secret = app_secret
         self._handler = handler
         self._metrics = metrics
+        self._metadata_handler = metadata_handler
         self._thread: threading.Thread | None = None
         self._running = threading.Event()
 
@@ -222,16 +409,30 @@ class FeishuLongConnection:
                         sender_id = event.sender.sender_id
                         if sender_id is None or not sender_id.open_id:
                             return
-                        content = json.loads(event.message.content or "{}")
-                        text = content.get("text")
-                        if not isinstance(text, str) or not text.strip():
-                            return
-                        event_id = event.message.message_id or data.header.event_id
+                        metadata = extract_feishu_event_metadata(data)
+                        event_id = event.message.message_id or _nonblank_text(
+                            getattr(getattr(data, "header", None), "event_id", None)
+                        )
                         if not isinstance(event_id, str) or not event_id:
                             return
+                        content = json.loads(event.message.content or "{}")
+                        text = content.get("text")
 
                         async def dispatch() -> None:
-                            await self._handler(event_id, sender_id.open_id, text.strip())
+                            operations: list[Awaitable[None]] = []
+                            if isinstance(text, str) and text.strip():
+                                operations.append(
+                                    self._handler(event_id, sender_id.open_id, text.strip())
+                                )
+                            if self._metadata_handler is not None and metadata is not None:
+                                operations.append(self._safe_metadata_dispatch(metadata))
+                            if operations:
+                                await asyncio.gather(*operations)
+
+                        if (
+                            not isinstance(text, str) or not text.strip()
+                        ) and (self._metadata_handler is None or metadata is None):
+                            return
 
                         future = asyncio.run_coroutine_threadsafe(dispatch(), loop)
 
@@ -281,3 +482,16 @@ class FeishuLongConnection:
 
         self._thread = threading.Thread(target=run, name="feishu-long-connection", daemon=True)
         self._thread.start()
+
+    async def _safe_metadata_dispatch(self, metadata: FeishuEventMetadata) -> None:
+        try:
+            assert self._metadata_handler is not None
+            await self._metadata_handler(metadata)
+        except Exception:
+            logger.error(
+                "feishu administrative metadata handoff failed",
+                extra={
+                    "event": "feishu_administrative_metadata_handoff_failed",
+                    "error_code": "ADMIN_INGRESS_HANDOFF_FAILED",
+                },
+            )
