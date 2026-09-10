@@ -303,6 +303,7 @@ class AdministrativeIngressClient:
         self,
         base_url: str,
         *,
+        shared_secret: str = "",
         transport: httpx.AsyncBaseTransport | None = None,
         max_attempts: int = 3,
         retry_base_seconds: float = 0.25,
@@ -312,6 +313,7 @@ class AdministrativeIngressClient:
         if max_attempts < 1:
             raise ValueError("max_attempts must be positive")
         self._base_url = base_url.rstrip("/")
+        self._shared_secret = shared_secret.strip()
         self._max_attempts = max_attempts
         self._retry_base_seconds = retry_base_seconds
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(10.0), transport=transport)
@@ -326,13 +328,13 @@ class AdministrativeIngressClient:
         await asyncio.sleep(max(0.0, min(delay, 10.0)))
 
     async def send_metadata(self, metadata: FeishuEventMetadata) -> None:
-        # The current administrative boundary authenticates this compatibility
-        # path with the provider callback token. Never send an unverifiable
-        # reconstructed event.
-        if not metadata.verification_token:
+        # The long-connection event may not carry the HTTP callback token. The
+        # internal handoff therefore uses a dedicated transport credential;
+        # never send an unauthenticated reconstructed event.
+        if not self._shared_secret:
             raise GatewayError(
                 "ADMIN_INGRESS_AUTH_UNAVAILABLE",
-                "Administrative ingress authentication is unavailable",
+                "Administrative ingress transport authentication is unavailable",
                 503,
             )
 
@@ -343,7 +345,10 @@ class AdministrativeIngressClient:
                 response = await self._client.post(
                     f"{self._base_url}{ADMINISTRATIVE_INGRESS_PATH}",
                     json=payload,
-                    headers={"Accept": "application/json"},
+                    headers={
+                        "Accept": "application/json",
+                        "X-Administrative-Ingress-Token": self._shared_secret,
+                    },
                 )
             except httpx.RequestError as exc:
                 last_error = exc
@@ -444,17 +449,22 @@ class FeishuLongConnection:
                                     text = candidate_text.strip()
 
                         async def dispatch() -> None:
-                            operations: list[Awaitable[None]] = []
-                            administrative_route = text is not None and is_administrative_route(
-                                text,
-                                self._administrative_route_prefix,
-                            )
-                            if text is not None and not administrative_route:
-                                operations.append(self._handler(event_id, sender_id.open_id, text))
-                            if self._metadata_handler is not None and metadata is not None:
-                                operations.append(self._safe_metadata_dispatch(metadata))
-                            if operations:
-                                await asyncio.gather(*operations)
+                            # Exclusive transport routing: an event enters at
+                            # most one execution system, selected by transport
+                            # facts only. The gateway never interprets
+                            # administrative intent here.
+                            if text is None:
+                                # Non-text events never reach the control
+                                # plane; with ingress enabled they cross the
+                                # boundary as metadata only.
+                                if self._metadata_handler is not None and metadata is not None:
+                                    await self._safe_metadata_dispatch(metadata)
+                                return
+                            if is_administrative_route(text, self._administrative_route_prefix):
+                                if self._metadata_handler is not None and metadata is not None:
+                                    await self._safe_metadata_dispatch(metadata)
+                                return
+                            await self._handler(event_id, sender_id.open_id, text)
 
                         if (
                             not isinstance(text, str) or not text.strip()
