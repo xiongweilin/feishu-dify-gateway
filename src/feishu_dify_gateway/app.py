@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from .config import Settings
 from .errors import GatewayError
-from .feishu import FeishuLongConnection
+from .feishu import AdministrativeIngressClient, FeishuLongConnection
 from .metrics import Metrics
 from .models import (
     AcceptedResponse,
@@ -55,6 +55,11 @@ def create_app(
         metrics = gateway.metrics
     enable_ws = settings.ws_enabled if start_long_connection is None else start_long_connection
     connection: FeishuLongConnection | None = None
+    administrative_ingress = (
+        AdministrativeIngressClient(settings.administrative_ingress_base_url)
+        if settings.administrative_ingress_base_url.strip()
+        else None
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -66,10 +71,17 @@ def create_app(
                 settings.feishu_app_secret,
                 gateway.handle_feishu_text,
                 metrics,
+                metadata_handler=(
+                    administrative_ingress.send_metadata
+                    if administrative_ingress is not None
+                    else None
+                ),
             )
             connection.start(asyncio.get_running_loop())
         yield
         await gateway.close()
+        if administrative_ingress is not None:
+            await administrative_ingress.close()
 
     app = FastAPI(
         title="Feishu-Dify Gateway",
