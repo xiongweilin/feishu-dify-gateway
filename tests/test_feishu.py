@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ from feishu_dify_gateway.errors import GatewayError
 from feishu_dify_gateway.feishu import (
     AdministrativeIngressClient,
     FeishuEventMetadata,
+    FeishuLongConnection,
     FeishuSender,
     extract_feishu_event_metadata,
 )
@@ -205,3 +207,84 @@ async def test_administrative_ingress_client_fails_closed_without_token() -> Non
         await client.close()
 
     assert captured.value.code == "ADMIN_INGRESS_AUTH_UNAVAILABLE"
+
+
+async def test_long_connection_forwards_non_text_metadata_without_reading_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import lark_oapi as lark
+
+    received: list[FeishuEventMetadata] = []
+    received_event = asyncio.Event()
+
+    async def handle_text(*_: str) -> None:
+        pytest.fail("non-text events must not enter control-plane text dispatch")
+
+    async def handle_metadata(metadata: FeishuEventMetadata) -> None:
+        received.append(metadata)
+        received_event.set()
+
+    callback: list[object] = []
+
+    class FakeDispatcherBuilder:
+        @classmethod
+        def builder(cls, *_: str) -> FakeDispatcherBuilder:
+            return cls()
+
+        def register_p2_im_message_receive_v1(self, handler: object) -> FakeDispatcherBuilder:
+            callback.append(handler)
+            return self
+
+        def build(self) -> object:
+            return object()
+
+    class FakeClient:
+        def __init__(self, *_: object, **__: object) -> None:
+            pass
+
+        def start(self) -> None:
+            assert callback
+            callback[0](
+                SimpleNamespace(
+                    header=SimpleNamespace(
+                        event_id="event-file",
+                        event_type="im.message.receive_v1",
+                        tenant_key="tenant-1",
+                        create_time="1893456000000",
+                        token="callback-token",
+                    ),
+                    event=SimpleNamespace(
+                        sender=SimpleNamespace(
+                            sender_id=SimpleNamespace(open_id="ou-1"),
+                            tenant_key="tenant-1",
+                        ),
+                        message=SimpleNamespace(
+                            message_id="om-file",
+                            root_id=None,
+                            parent_id=None,
+                            thread_id="thread-file",
+                            create_time=1893456000000,
+                            message_type="file",
+                            content="must-not-be-read-as-json",
+                        ),
+                    ),
+                )
+            )
+
+    monkeypatch.setattr(lark, "EventDispatcherHandler", FakeDispatcherBuilder)
+    monkeypatch.setattr(lark.ws, "Client", FakeClient)
+
+    connection = FeishuLongConnection(
+        "app-id",
+        "app-secret",
+        handle_text,
+        Metrics(),
+        metadata_handler=handle_metadata,
+    )
+    connection.start(asyncio.get_running_loop())
+    await asyncio.wait_for(received_event.wait(), timeout=2)
+
+    assert len(received) == 1
+    assert received[0].event_id == "event-file"
+    assert received[0].message_type == "file"
+    assert "content" not in json.dumps(received[0].provider_envelope())
