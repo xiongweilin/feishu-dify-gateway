@@ -28,6 +28,17 @@ def _provider_status_code(status_code: int) -> int:
     return status_code if status_code >= 400 else 422
 
 
+def is_administrative_route(text: str, prefix: str) -> bool:
+    """Select the Administrative transport lane without interpreting intent."""
+    normalized_prefix = prefix.strip().rstrip("/")
+    normalized_text = text.strip()
+    return bool(
+        normalized_prefix
+        and (normalized_text == normalized_prefix
+             or normalized_text.startswith(f"{normalized_prefix} "))
+    )
+
+
 class FeishuSender:
     def __init__(
         self,
@@ -375,12 +386,14 @@ class FeishuLongConnection:
         handler: Callable[[str, str, str], Awaitable[None]],
         metrics: Metrics,
         metadata_handler: Callable[[FeishuEventMetadata], Awaitable[None]] | None = None,
+        administrative_route_prefix: str = "",
     ) -> None:
         self._app_id = app_id
         self._app_secret = app_secret
         self._handler = handler
         self._metrics = metrics
         self._metadata_handler = metadata_handler
+        self._administrative_route_prefix = administrative_route_prefix.strip().rstrip("/")
         self._thread: threading.Thread | None = None
         self._running = threading.Event()
 
@@ -432,7 +445,11 @@ class FeishuLongConnection:
 
                         async def dispatch() -> None:
                             operations: list[Awaitable[None]] = []
-                            if text is not None:
+                            administrative_route = text is not None and is_administrative_route(
+                                text,
+                                self._administrative_route_prefix,
+                            )
+                            if text is not None and not administrative_route:
                                 operations.append(self._handler(event_id, sender_id.open_id, text))
                             if self._metadata_handler is not None and metadata is not None:
                                 operations.append(self._safe_metadata_dispatch(metadata))

@@ -29,7 +29,7 @@ Task execution and repair governance belong to `xiongweilin/control-plane`. This
 - `/v1/notifications` must use a timestamp, event id, and HMAC-SHA256 signature.
 - `/v1/alerts/alertmanager` is used only through the Docker `shared-net`.
 - Control-plane approval callbacks use the `X-Control-Plane-Key` shared-key header; `CONTROL_PLANE_BASE_URL` points to the Windows host `http://host.docker.internal:18083`.
-- Optional Administrative M6 compatibility forwarding is disabled unless `ADMINISTRATIVE_INGRESS_BASE_URL` is set; it sends only a reconstructed Feishu metadata envelope to `/v1/intake/feishu/events` and does not alter control-plane dispatch.
+- Optional Administrative M6 compatibility forwarding is disabled unless `ADMINISTRATIVE_INGRESS_BASE_URL` is set. When enabled, a message whose transport prefix matches `ADMINISTRATIVE_ROUTE_PREFIX` (default `/admin`) is sent only as a reconstructed Feishu metadata envelope to `/v1/intake/feishu/events`; the gateway does not interpret the remainder or dispatch that event to the control plane. Messages without the prefix retain the existing control-plane path.
 - Feishu responses are always validated as untrusted external input.
 - The idempotency store keeps only event ids, status, and time — never message bodies.
 - Notification delivery has a metadata-only ledger. `transport_accepted` means the next transport endpoint accepted the request; `delivery_confirmed` means the Feishu provider returned success. Neither state asserts that a human read the message.
