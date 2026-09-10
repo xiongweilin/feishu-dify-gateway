@@ -404,8 +404,6 @@ class FeishuLongConnection:
                         event = data.event
                         if event is None or event.message is None or event.sender is None:
                             return
-                        if event.message.message_type != "text":
-                            return
                         sender_id = event.sender.sender_id
                         if sender_id is None or not sender_id.open_id:
                             return
@@ -415,15 +413,27 @@ class FeishuLongConnection:
                         )
                         if not isinstance(event_id, str) or not event_id:
                             return
-                        content = json.loads(event.message.content or "{}")
-                        text = content.get("text")
+                        text: str | None = None
+                        if event.message.message_type == "text":
+                            try:
+                                content = json.loads(event.message.content or "{}")
+                            except (TypeError, ValueError):
+                                logger.warning(
+                                    "feishu text event content rejected",
+                                    extra={
+                                        "event": "feishu_event_rejected",
+                                        "error_code": "INVALID_TEXT_CONTENT",
+                                    },
+                                )
+                            else:
+                                candidate_text = content.get("text")
+                                if isinstance(candidate_text, str) and candidate_text.strip():
+                                    text = candidate_text.strip()
 
                         async def dispatch() -> None:
                             operations: list[Awaitable[None]] = []
-                            if isinstance(text, str) and text.strip():
-                                operations.append(
-                                    self._handler(event_id, sender_id.open_id, text.strip())
-                                )
+                            if text is not None:
+                                operations.append(self._handler(event_id, sender_id.open_id, text))
                             if self._metadata_handler is not None and metadata is not None:
                                 operations.append(self._safe_metadata_dispatch(metadata))
                             if operations:
