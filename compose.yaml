@@ -22,6 +22,7 @@ services:
       GATEWAY_PUBLIC_PORT: "8083"
       PROMETHEUS_BASE_URL: http://prometheus:9090
       CONTROL_PLANE_BASE_URL: http://host.docker.internal:18083
+      ADMINISTRATIVE_INGRESS_BASE_URL: "${ADMINISTRATIVE_INGRESS_BASE_URL:-}"
       FEISHU_WS_ENABLED: "true"
     volumes:
       - feishu_secrets:/run/secrets:ro
