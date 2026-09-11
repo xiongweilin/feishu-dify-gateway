@@ -429,8 +429,17 @@ async def test_long_connection_forwards_non_text_metadata_without_reading_body(
     assert "content" not in json.dumps(received[0].provider_envelope())
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "/admin onboard employee:1",
+        "/admin\ncase_kind=employee-offboarding",
+        "/admin\tcase_kind=employee-offboarding",
+    ],
+)
 async def test_long_connection_routes_admin_text_only_to_administrative_handoff(
     monkeypatch: pytest.MonkeyPatch,
+    text: str,
 ) -> None:
     control_plane_calls: list[tuple[str, str, str]] = []
     metadata_calls: list[FeishuEventMetadata] = []
@@ -448,7 +457,7 @@ async def test_long_connection_routes_admin_text_only_to_administrative_handoff(
             event_id="event-admin",
             message_id="om-admin",
             message_type="text",
-            content=json.dumps({"text": "/admin onboard employee:1"}),
+            content=json.dumps({"text": text}),
         ),
         delivered,
     )
@@ -581,5 +590,12 @@ async def test_long_connection_drops_non_text_without_administrative_ingress(
 def test_administrative_route_prefix_is_transport_only() -> None:
     assert is_administrative_route("/admin onboard employee:1", "/admin")
     assert is_administrative_route("  /admin  ", "/admin")
+    assert is_administrative_route("/admin\n\ncase_kind=employee-offboarding", "/admin")
+    assert is_administrative_route("/admin\r\ncase_kind=employee-offboarding", "/admin")
+    assert is_administrative_route("/admin\tcase_kind=employee-offboarding", "/admin")
     assert not is_administrative_route("/administrator onboard employee:1", "/admin")
+    assert not is_administrative_route("/adminx case_kind=employee-offboarding", "/admin")
+    assert not is_administrative_route("/admin-test case_kind=employee-offboarding", "/admin")
+    assert not is_administrative_route("/foo/admin case_kind=employee-offboarding", "/admin")
+    assert not is_administrative_route("hello /admin case_kind=employee-offboarding", "/admin")
     assert not is_administrative_route("onboard employee:1", "/admin")
