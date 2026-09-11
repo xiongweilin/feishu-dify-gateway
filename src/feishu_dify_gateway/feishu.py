@@ -32,10 +32,16 @@ def is_administrative_route(text: str, prefix: str) -> bool:
     """Select the Administrative transport lane without interpreting intent."""
     normalized_prefix = prefix.strip().rstrip("/")
     normalized_text = text.strip()
+    suffix = normalized_text[len(normalized_prefix) :]
     return bool(
         normalized_prefix
-        and (normalized_text == normalized_prefix
-             or normalized_text.startswith(f"{normalized_prefix} "))
+        and (
+            normalized_text == normalized_prefix
+            or (
+                normalized_text.startswith(normalized_prefix)
+                and suffix[:1].isspace()
+            )
+        )
     )
 
 
