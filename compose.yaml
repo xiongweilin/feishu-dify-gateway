@@ -50,6 +50,6 @@ networks:
 
 volumes:
   feishu_gateway_data:
-    name: feishu-dify-gateway_feishu_gateway_data
+    name: feishu-gateway_feishu_gateway_data
   feishu_secrets:
     external: true
