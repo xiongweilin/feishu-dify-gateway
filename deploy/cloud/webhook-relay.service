@@ -6,11 +6,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/srv/feishu-dify-gateway
+WorkingDirectory=/srv/feishu-gateway
 Environment=PYTHONUNBUFFERED=1
 Environment=RELAY_QUEUE_DIR=/var/lib/feishu-webhook-relay/queue
 EnvironmentFile=-/etc/feishu-relay/config
-ExecStart=/srv/feishu-dify-gateway/.venv/bin/python /srv/feishu-dify-gateway/cloud/relay.py
+ExecStart=/srv/feishu-gateway/.venv/bin/python /srv/feishu-gateway/cloud/relay.py
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo=/srv/feishu-dify-gateway
+repo=/srv/feishu-gateway
 tools_dir=$repo/.tools
 uv_bin=$tools_dir/uv
 uv_image=ghcr.io/astral-sh/uv:0.12.1

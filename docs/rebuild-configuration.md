@@ -4,7 +4,7 @@ This document records the current non-secret configuration shape and values. Sec
 
 ## Source
 
-- Working tree: D:\infrastructure\compose\feishu-dify-gateway
+- Working tree: D:\infrastructure\compose\feishu-gateway
 - Compose and application files in this repository remain the service-definition source of truth.
 - The active .env file is a local deployment input and is intentionally not committed.
 
