@@ -27,8 +27,8 @@ write_value() {
 }
 
 write_value "$relay_dir/notification_hmac_key" 'Shared notification HMAC key'
-write_value "$watchdog_dir/smtp_username" 'QQ 邮箱 SMTP 用户名'
-write_value "$watchdog_dir/smtp_app_password" 'QQ 邮箱 SMTP 授权码'
+write_value "$watchdog_dir/smtp_username" 'SMTP username'
+write_value "$watchdog_dir/smtp_app_password" 'SMTP credential'
 write_value "$watchdog_dir/smtp_recipient" '备用接收邮箱'
 
 chmod 600 "$relay_dir"/* "$watchdog_dir"/*

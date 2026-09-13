@@ -3,7 +3,7 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-$credentialName = 'Agent:Metratio:FeishuGatewayHmac'
+$credentialName = 'Agent:FeishuGateway:Hmac'
 
 if (-not ('FeishuNotify.NativeWriteMethods' -as [type])) {
     Add-Type -TypeDefinition @'

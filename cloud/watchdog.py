@@ -88,7 +88,7 @@ def send_mail(secret_dir: Path, subject: str, body: str) -> None:
     username = read_secret(secret_dir, "smtp_username")
     password = read_secret(secret_dir, "smtp_app_password")
     recipient = read_secret(secret_dir, "smtp_recipient")
-    host = os.getenv("WATCHDOG_SMTP_HOST", "smtp.qq.com")
+    host = os.getenv("WATCHDOG_SMTP_HOST", "smtp.example.internal")
     port = int(os.getenv("WATCHDOG_SMTP_PORT", "587"))
     message = EmailMessage()
     message["From"] = username
@@ -107,7 +107,7 @@ def main() -> None:
         os.getenv("WATCHDOG_STATE_FILE", "/var/lib/feishu-gateway-watchdog/state.json")
     )
     secret_dir = Path(os.getenv("WATCHDOG_SECRETS_DIR", "/etc/feishu-gateway-watchdog"))
-    ready_url = os.getenv("WATCHDOG_READY_URL", "http://metratio.tail1f4641.ts.net:8082/readyz")
+    ready_url = os.getenv("WATCHDOG_READY_URL", "http://gateway.example.internal:8082/readyz")
     email_enabled = env_flag("WATCHDOG_EMAIL_ENABLED", True)
     now = int(time.time())
     state = load_state(state_path)
@@ -121,8 +121,8 @@ def main() -> None:
     elif action == "failure":
         send_mail(
             secret_dir,
-            "Metratio message gateway unavailable",
-            "The Feishu message gateway has failed readiness checks for at least five minutes.",
+            "Feishu gateway unavailable",
+            "The Feishu gateway has failed readiness checks for at least five minutes.",
         )
         state.notified = True
         state.last_notice_at = now
@@ -130,8 +130,8 @@ def main() -> None:
         if now - state.last_notice_at >= 21_600:
             send_mail(
                 secret_dir,
-                "Metratio message gateway recovered",
-                "The Feishu message gateway is ready again.",
+                "Feishu gateway recovered",
+                "The Feishu gateway is ready again.",
             )
             state.last_notice_at = now
     save_state(state_path, state)

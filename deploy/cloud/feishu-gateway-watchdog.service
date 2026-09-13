@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=oneshot
 User=root
 WorkingDirectory=/srv/feishu-cloud-gateway
-# Keep the readiness watchdog active, but disable outbound QQ SMTP mail.
+# Keep the readiness watchdog active, but disable outbound SMTP mail.
 Environment=WATCHDOG_EMAIL_ENABLED=false
 EnvironmentFile=-/etc/feishu-gateway-watchdog/config
 ExecStart=/srv/feishu-cloud-gateway/.venv/bin/python /srv/feishu-cloud-gateway/cloud/watchdog.py

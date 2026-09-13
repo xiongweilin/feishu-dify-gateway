@@ -617,7 +617,7 @@ def main() -> None:
         queue,
         os.getenv(
             "RELAY_GATEWAY_URL",
-            "http://metratio.tail1f4641.ts.net:8082/v1/notifications",
+            "http://gateway.example.internal:8082/v1/notifications",
         ),
         secret,
         metrics,

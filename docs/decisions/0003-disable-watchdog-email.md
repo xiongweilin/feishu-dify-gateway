@@ -10,7 +10,7 @@ Accepted
 
 ## 背景
 
-云端 `feishu-gateway-watchdog.timer` 负责探测飞书网关就绪状态。其历史实现同时通过 QQ SMTP 发送故障与恢复邮件。当前运行策略要求保留就绪探测和状态证据，但暂停邮箱告警，避免该通知渠道产生噪声；飞书通知链路与 Alertmanager → gateway 路径不在本决定范围内。
+云端 `feishu-gateway-watchdog.timer` 负责探测飞书网关就绪状态。其历史实现同时通过 SMTP 发送故障与恢复邮件。当前运行策略要求保留就绪探测和状态证据，但暂停邮箱告警，避免该通知渠道产生噪声；飞书通知链路与 Alertmanager → gateway 路径不在本决定范围内。
 
 ## 决定
 
@@ -26,6 +26,6 @@ Accepted
 
 ## 后果
 
-- 云端不再发送 QQ SMTP 故障/恢复邮件。
+- 云端不再发送 SMTP 故障/恢复邮件。
 - systemd timer、就绪检查、状态文件和飞书通知链路保持运行。
 - 若未来需要恢复邮件，只需将开关改为 `true` 并重新加载 systemd；无需重新录入凭据。
