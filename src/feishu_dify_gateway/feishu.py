@@ -128,7 +128,7 @@ class FeishuSender:
 
     async def send_text(
         self, recipient_open_id: str, text: str, idempotency_key: str
-    ) -> None:
+    ) -> str | None:
         started = perf_counter()
         try:
             last_error: Exception | None = None
@@ -188,6 +188,10 @@ class FeishuSender:
         finally:
             self._metrics.external_duration.labels("feishu").observe(perf_counter() - started)
         self._metrics.external_requests.labels("feishu", "success").inc()
+        if parsed.data is None:
+            return None
+        message_id = parsed.data.get("message_id")
+        return message_id if isinstance(message_id, str) and message_id else None
 
     async def ready(self) -> bool:
         try:

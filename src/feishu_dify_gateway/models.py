@@ -129,3 +129,58 @@ class FeishuMessageResponse(BaseModel):
 
     code: int
     msg: str = ""
+    data: dict[str, object] | None = None
+
+
+class AdministrativeCommunicationRequest(BaseModel):
+    """One metadata-addressed internal Feishu message.
+
+    The text is accepted only for immediate transport.  The gateway never
+    persists this model or its body; only a digest and bounded delivery state
+    enter the ledger.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    event_id: ShortText = Field(alias="eventId")
+    recipient_open_id: ShortText = Field(alias="recipientOpenId")
+    text: LongText
+    draft_kind: ShortText = Field(alias="draftKind")
+
+
+AdministrativeCommunicationStatus = Literal[
+    "prepared",
+    "delivering",
+    "retrying",
+    "transport_accepted",
+    "delivery_confirmed",
+    "outcome_unknown",
+    "permanent_failed",
+    "deduplicated",
+]
+
+
+class AdministrativeCommunicationAcceptedResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    event_id: str = Field(alias="eventId")
+    status: AdministrativeCommunicationStatus
+    transport_accepted: bool = Field(alias="transportAccepted")
+    delivery_confirmed: bool = Field(alias="deliveryConfirmed")
+    provider_message_ref: str | None = Field(default=None, alias="providerMessageRef")
+
+
+class AdministrativeCommunicationLedgerResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    event_id: str = Field(alias="eventId")
+    status: str
+    transport_accepted: bool = Field(alias="transportAccepted")
+    delivery_confirmed: bool = Field(alias="deliveryConfirmed")
+    attempts: int
+    body_digest: str = Field(alias="bodyDigest")
+    recipient_digest: str = Field(alias="recipientDigest")
+    provider_message_ref: str | None = Field(default=None, alias="providerMessageRef")
+    last_error_code: str = Field(alias="lastErrorCode")
+    created_at: int = Field(alias="createdAt")
+    updated_at: int = Field(alias="updatedAt")
