@@ -1,10 +1,10 @@
 services:
-  feishu-dify-gateway:
+  feishu-gateway:
     build:
       context: .
-    image: feishu-dify-gateway:0.1.0
+    image: feishu-gateway:0.1.0
     pull_policy: build
-    container_name: feishu-dify-gateway
+    container_name: feishu-gateway
     restart: unless-stopped
     read_only: true
     cap_drop:
@@ -50,5 +50,6 @@ networks:
 
 volumes:
   feishu_gateway_data:
+    name: feishu-dify-gateway_feishu_gateway_data
   feishu_secrets:
     external: true
