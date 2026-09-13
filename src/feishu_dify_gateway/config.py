@@ -25,6 +25,13 @@ def _read_secret(directory: Path, name: str) -> str:
     return _read_secret_path(directory / name, name)
 
 
+def _optional_secret(file_env: str, value_env: str, label: str) -> str:
+    file_name = os.getenv(file_env, "").strip()
+    if file_name:
+        return _read_secret_path(Path(file_name), label)
+    return os.getenv(value_env, "")
+
+
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -58,6 +65,7 @@ class Settings:
     control_plane_base_url: str = "http://host.docker.internal:18083"
     administrative_ingress_base_url: str = ""
     administrative_ingress_shared_secret: str = ""
+    administrative_communication_hmac_key: str = ""
     administrative_route_prefix: str = ""
     feishu_base_url: str = "https://open.feishu.cn"
     host: str = "0.0.0.0"
@@ -77,6 +85,11 @@ class Settings:
             if shared_secret_file
             else os.getenv("ADMINISTRATIVE_INGRESS_SHARED_SECRET", "")
         )
+        communication_key = _optional_secret(
+            "ADMINISTRATIVE_COMMUNICATION_HMAC_KEY_FILE",
+            "ADMINISTRATIVE_COMMUNICATION_HMAC_KEY",
+            "administrative communication HMAC key",
+        )
         return cls(
             feishu_app_id=_read_secret(secrets_dir, "feishu_app_id"),
             feishu_app_secret=_read_secret(secrets_dir, "feishu_app_secret"),
@@ -92,6 +105,7 @@ class Settings:
             ),
             administrative_ingress_base_url=os.getenv("ADMINISTRATIVE_INGRESS_BASE_URL", ""),
             administrative_ingress_shared_secret=shared_secret,
+            administrative_communication_hmac_key=communication_key,
             administrative_route_prefix=_route_prefix(
                 "ADMINISTRATIVE_ROUTE_PREFIX", "/admin"
             ),

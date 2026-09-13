@@ -20,6 +20,9 @@ from .feishu import AdministrativeIngressClient, FeishuLongConnection
 from .metrics import Metrics
 from .models import (
     AcceptedResponse,
+    AdministrativeCommunicationAcceptedResponse,
+    AdministrativeCommunicationLedgerResponse,
+    AdministrativeCommunicationRequest,
     AlertmanagerPayload,
     DeliveryLedgerResponse,
     ErrorDetail,
@@ -29,7 +32,7 @@ from .models import (
     SyntheticPrepareResponse,
     SyntheticProbeResponse,
 )
-from .security import SignatureError, verify_request
+from .security import SignatureError, body_digest, verify_request
 from .service import GatewayService
 from .store import StateStore
 
@@ -120,6 +123,7 @@ def create_app(
         internal_only = request.url.path == "/v1/alerts/alertmanager" or (
             request.url.path.startswith("/v1/notifications/synthetic")
             or request.url.path.startswith("/v1/delivery-ledger/")
+            or request.url.path.startswith("/v1/administrative/communications")
         )
         if internal_only and local_port != settings.port:
             blocked_response = error_response("NOT_FOUND", "Resource not found", 404)
@@ -208,6 +212,87 @@ def create_app(
         except ValidationError:
             return error_response("VALIDATION_ERROR", "Request validation failed", 422)
         return await gateway.deliver_notification(event_id, notification)
+
+    @app.post(
+        "/v1/administrative/communications",
+        response_model=AdministrativeCommunicationAcceptedResponse,
+        status_code=202,
+    )
+    async def administrative_communications(
+        request: Request,
+    ) -> AdministrativeCommunicationAcceptedResponse | JSONResponse:
+        body = await request.body()
+        event_id = request.headers.get("X-Event-ID", "")
+        timestamp = request.headers.get("X-Timestamp", "")
+        signature = request.headers.get("X-Signature", "")
+        if not settings.administrative_communication_hmac_key:
+            return error_response(
+                "NOT_CONFIGURED", "Administrative communication transport is not configured", 503
+            )
+        try:
+            verify_request(
+                settings.administrative_communication_hmac_key,
+                timestamp,
+                event_id,
+                signature,
+                body,
+                ttl_seconds=settings.notification_ttl_seconds,
+            )
+        except SignatureError:
+            return error_response("AUTHENTICATION_FAILED", "Request authentication failed", 401)
+        try:
+            communication = AdministrativeCommunicationRequest.model_validate_json(body)
+        except ValidationError:
+            return error_response("VALIDATION_ERROR", "Request validation failed", 422)
+        if communication.event_id != event_id:
+            return error_response("EVENT_CONFLICT", "Event identity mismatch", 409)
+        return await gateway.send_administrative_communication(
+            event_id,
+            communication,
+            body_digest=body_digest(body),
+        )
+
+    @app.get(
+        "/v1/administrative/communications/{event_id}",
+        response_model=AdministrativeCommunicationLedgerResponse,
+    )
+    async def administrative_communication_ledger(
+        event_id: str,
+        request: Request,
+    ) -> AdministrativeCommunicationLedgerResponse | JSONResponse:
+        if not settings.administrative_communication_hmac_key:
+            return error_response(
+                "NOT_CONFIGURED", "Administrative communication transport is not configured", 503
+            )
+        timestamp = request.headers.get("X-Timestamp", "")
+        signature = request.headers.get("X-Signature", "")
+        try:
+            verify_request(
+                settings.administrative_communication_hmac_key,
+                timestamp,
+                event_id,
+                signature,
+                b"",
+                ttl_seconds=settings.notification_ttl_seconds,
+            )
+        except SignatureError:
+            return error_response("AUTHENTICATION_FAILED", "Request authentication failed", 401)
+        entry = gateway.administrative_communication_ledger(event_id)
+        if entry is None:
+            return error_response("NOT_FOUND", "Communication ledger entry not found", 404)
+        return AdministrativeCommunicationLedgerResponse(
+            eventId=entry.event_id,
+            status=entry.status,
+            transportAccepted=entry.transport_accepted,
+            deliveryConfirmed=entry.delivery_confirmed,
+            attempts=entry.attempts,
+            bodyDigest=entry.body_digest,
+            recipientDigest=entry.recipient_digest,
+            providerMessageRef=entry.provider_message_ref,
+            lastErrorCode=entry.last_error_code,
+            createdAt=entry.created_at,
+            updatedAt=entry.updated_at,
+        )
 
     @app.post(
         "/v1/notifications/synthetic/prepare",
