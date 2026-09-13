@@ -73,3 +73,21 @@ class Metrics:
             ("path",),
             registry=self.registry,
         )
+        self.administrative_communications = Counter(
+            "feishu_gateway_administrative_communications_total",
+            "Governed internal communication outcomes",
+            ("result",),
+            registry=self.registry,
+        )
+        self.administrative_communication_states = Counter(
+            "feishu_gateway_administrative_communication_states_total",
+            "Governed internal communication ledger state transitions",
+            ("state",),
+            registry=self.registry,
+        )
+        self.administrative_communication_attempts = Counter(
+            "feishu_gateway_administrative_communication_attempts_total",
+            "Governed internal communication attempts",
+            ("result",),
+            registry=self.registry,
+        )

@@ -48,6 +48,51 @@ class DeliveryLedgerEntry:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class AdministrativeCommunicationLedgerEntry:
+    event_id: str
+    body_digest: str
+    recipient_digest: str
+    status: str
+    transport_accepted: bool
+    delivery_confirmed: bool
+    attempts: int
+    provider_message_ref: str | None
+    last_error_code: str
+    created_at: int
+    updated_at: int
+    transport_accepted_at: int | None
+    delivery_confirmed_at: int | None
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> AdministrativeCommunicationLedgerEntry:
+        return cls(
+            event_id=str(row["event_id"]),
+            body_digest=str(row["body_digest"]),
+            recipient_digest=str(row["recipient_digest"]),
+            status=str(row["status"]),
+            transport_accepted=bool(row["transport_accepted"]),
+            delivery_confirmed=bool(row["delivery_confirmed"]),
+            attempts=int(row["attempts"]),
+            provider_message_ref=(
+                None if row["provider_message_ref"] is None else str(row["provider_message_ref"])
+            ),
+            last_error_code=str(row["last_error_code"]),
+            created_at=int(row["created_at"]),
+            updated_at=int(row["updated_at"]),
+            transport_accepted_at=(
+                None
+                if row["transport_accepted_at"] is None
+                else int(row["transport_accepted_at"])
+            ),
+            delivery_confirmed_at=(
+                None
+                if row["delivery_confirmed_at"] is None
+                else int(row["delivery_confirmed_at"])
+            ),
+        )
+
+
 class StateStore:
     """SQLite state containing metadata only; message bodies are never persisted."""
 
@@ -86,6 +131,21 @@ class StateStore:
                     next_retry_at INTEGER,
                     terminal_at INTEGER,
                     synthetic INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS administrative_communication_ledger (
+                    event_id TEXT PRIMARY KEY,
+                    body_digest TEXT NOT NULL,
+                    recipient_digest TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    transport_accepted INTEGER NOT NULL DEFAULT 0,
+                    delivery_confirmed INTEGER NOT NULL DEFAULT 0,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    provider_message_ref TEXT,
+                    last_error_code TEXT NOT NULL DEFAULT '',
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    transport_accepted_at INTEGER,
+                    delivery_confirmed_at INTEGER
                 );
                 """
             )
@@ -218,6 +278,89 @@ class StateStore:
             ).fetchone()
         return None if row is None else DeliveryLedgerEntry.from_row(row)
 
+    def begin_administrative_communication(
+        self,
+        event_id: str,
+        body_digest: str,
+        recipient_digest: str,
+        now: int | None = None,
+    ) -> bool:
+        timestamp = int(time.time()) if now is None else now
+        with self._lock:
+            cursor = self._connection.execute(
+                """
+                INSERT OR IGNORE INTO administrative_communication_ledger(
+                    event_id, body_digest, recipient_digest, status,
+                    attempts, created_at, updated_at
+                ) VALUES (?, ?, ?, 'prepared', 0, ?, ?)
+                """,
+                (event_id, body_digest, recipient_digest, timestamp, timestamp),
+            )
+        return cursor.rowcount == 1
+
+    def administrative_communication_for(
+        self, event_id: str
+    ) -> AdministrativeCommunicationLedgerEntry | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM administrative_communication_ledger WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+        return (
+            None
+            if row is None
+            else AdministrativeCommunicationLedgerEntry.from_row(row)
+        )
+
+    def mark_administrative_communication_transport_accepted(
+        self,
+        event_id: str,
+        provider_message_ref: str | None,
+        now: int | None = None,
+    ) -> None:
+        timestamp = int(time.time()) if now is None else now
+        with self._lock:
+            self._connection.execute(
+                """
+                UPDATE administrative_communication_ledger
+                SET status='transport_accepted', transport_accepted=1,
+                    attempts=attempts + 1, provider_message_ref=?,
+                    updated_at=?, transport_accepted_at=?, last_error_code=''
+                WHERE event_id=?
+                """,
+                (provider_message_ref, timestamp, timestamp, event_id),
+            )
+
+    def mark_administrative_communication_unknown(
+        self, event_id: str, error_code: str, now: int | None = None
+    ) -> None:
+        timestamp = int(time.time()) if now is None else now
+        with self._lock:
+            self._connection.execute(
+                """
+                UPDATE administrative_communication_ledger
+                SET status='outcome_unknown', attempts=attempts + 1,
+                    updated_at=?, last_error_code=?
+                WHERE event_id=?
+                """,
+                (timestamp, error_code, event_id),
+            )
+
+    def mark_administrative_communication_failed(
+        self, event_id: str, error_code: str, now: int | None = None
+    ) -> None:
+        timestamp = int(time.time()) if now is None else now
+        with self._lock:
+            self._connection.execute(
+                """
+                UPDATE administrative_communication_ledger
+                SET status='permanent_failed', attempts=attempts + 1,
+                    updated_at=?, last_error_code=?
+                WHERE event_id=?
+                """,
+                (timestamp, error_code, event_id),
+            )
+
     def conversation_for(self, user_hash: str) -> str:
         with self._lock:
             row = self._connection.execute(
@@ -252,7 +395,15 @@ class StateStore:
                 """,
                 (cutoff,),
             )
-        return cursor.rowcount + ledger_cursor.rowcount
+            communication_cursor = self._connection.execute(
+                """
+                DELETE FROM administrative_communication_ledger
+                WHERE updated_at < ? AND status IN
+                    ('delivery_confirmed', 'permanent_failed')
+                """,
+                (cutoff,),
+            )
+        return cursor.rowcount + ledger_cursor.rowcount + communication_cursor.rowcount
 
     def close(self) -> None:
         with self._lock:

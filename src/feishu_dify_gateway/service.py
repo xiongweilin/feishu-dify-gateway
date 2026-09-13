@@ -16,6 +16,9 @@ from .feishu import FeishuSender
 from .metrics import Metrics
 from .models import (
     AcceptedResponse,
+    AdministrativeCommunicationAcceptedResponse,
+    AdministrativeCommunicationRequest,
+    AdministrativeCommunicationStatus,
     Alert,
     AlertmanagerPayload,
     Notification,
@@ -25,7 +28,7 @@ from .models import (
 )
 from .prometheus import PrometheusClient
 from .security import pseudonymous_user
-from .store import DeliveryLedgerEntry, StateStore
+from .store import AdministrativeCommunicationLedgerEntry, DeliveryLedgerEntry, StateStore
 
 logger = logging.getLogger(__name__)
 FEISHU_DELIVERY_NAMESPACE = uuid.UUID("589e9076-153c-40de-8751-b2469ea1af41")
@@ -70,7 +73,7 @@ class ControlPlaneClient:
 class Sender(Protocol):
     async def send_text(
         self, recipient_open_id: str, text: str, idempotency_key: str
-    ) -> None: ...
+    ) -> str | None: ...
 
     async def ready(self) -> bool: ...
 
@@ -231,6 +234,90 @@ class GatewayService:
             deliveryConfirmed=True,
         )
 
+    async def send_administrative_communication(
+        self,
+        event_id: str,
+        communication: AdministrativeCommunicationRequest,
+        *,
+        body_digest: str,
+    ) -> AdministrativeCommunicationAcceptedResponse:
+        """Send one governed internal message without retaining its body.
+
+        A replay with the same event and digest returns the recorded outcome.
+        A transport outcome that cannot be classified is terminal for this
+        event; callers must reconcile the ledger rather than send a duplicate.
+        """
+
+        recipient_digest = hashlib.sha256(
+            communication.recipient_open_id.encode("utf-8")
+        ).hexdigest()
+        existing = self.store.administrative_communication_for(event_id)
+        if existing is not None:
+            if existing.body_digest != body_digest or existing.recipient_digest != recipient_digest:
+                raise GatewayError(
+                    "EVENT_CONFLICT",
+                    "Communication event identity was reused with different content",
+                    409,
+                )
+            self.metrics.administrative_communications.labels("deduplicated").inc()
+            return AdministrativeCommunicationAcceptedResponse(
+                eventId=event_id,
+                status=cast(AdministrativeCommunicationStatus, existing.status),
+                transportAccepted=existing.transport_accepted,
+                deliveryConfirmed=existing.delivery_confirmed,
+                providerMessageRef=existing.provider_message_ref,
+            )
+
+        if not self.store.begin_administrative_communication(
+            event_id, body_digest, recipient_digest
+        ):
+            replay = self.store.administrative_communication_for(event_id)
+            if replay is None:
+                raise GatewayError("LEDGER_UNAVAILABLE", "Communication ledger unavailable", 503)
+            if replay.body_digest != body_digest or replay.recipient_digest != recipient_digest:
+                raise GatewayError(
+                    "EVENT_CONFLICT",
+                    "Communication event identity was reused with different content",
+                    409,
+                )
+            return AdministrativeCommunicationAcceptedResponse(
+                eventId=event_id,
+                status=cast(AdministrativeCommunicationStatus, replay.status),
+                transportAccepted=replay.transport_accepted,
+                deliveryConfirmed=replay.delivery_confirmed,
+                providerMessageRef=replay.provider_message_ref,
+            )
+
+        self.metrics.administrative_communication_states.labels("prepared").inc()
+        self.metrics.administrative_communication_attempts.labels("attempt").inc()
+        idempotency_key = str(uuid.uuid5(FEISHU_DELIVERY_NAMESPACE, f"administrative:{event_id}"))
+        try:
+            provider_ref = await self.sender.send_text(
+                communication.recipient_open_id,
+                communication.text,
+                idempotency_key,
+            )
+        except Exception as exc:
+            error_code, _ = self._delivery_failure(exc)
+            self.store.mark_administrative_communication_unknown(event_id, error_code)
+            self.metrics.administrative_communication_states.labels("outcome_unknown").inc()
+            raise GatewayError(
+                "COMMUNICATION_OUTCOME_UNKNOWN",
+                "Communication transport outcome is unknown; reconcile before retrying",
+                503,
+            ) from exc
+        self.store.mark_administrative_communication_transport_accepted(event_id, provider_ref)
+        self.metrics.administrative_communication_states.labels("transport_accepted").inc()
+        self.metrics.administrative_communication_attempts.labels("accepted").inc()
+        self.metrics.last_success.labels("administrative_communication").set(time.time())
+        return AdministrativeCommunicationAcceptedResponse(
+            eventId=event_id,
+            status="transport_accepted",
+            transportAccepted=True,
+            deliveryConfirmed=False,
+            providerMessageRef=provider_ref,
+        )
+
     async def deliver_alerts(self, payload: AlertmanagerPayload) -> AcceptedResponse:
         accepted = 0
         deduplicated = 0
@@ -316,6 +403,11 @@ class GatewayService:
 
     def delivery_ledger(self, event_id: str) -> DeliveryLedgerEntry | None:
         return self.store.delivery_for(event_id)
+
+    def administrative_communication_ledger(
+        self, event_id: str
+    ) -> AdministrativeCommunicationLedgerEntry | None:
+        return self.store.administrative_communication_for(event_id)
 
     @staticmethod
     def _alert_key(alert: Alert) -> str:
