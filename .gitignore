@@ -10,6 +10,7 @@ __pycache__/
 *.db
 *.sqlite*
 .coverage
+coverage.xml
 htmlcov/
 dist/
 build/

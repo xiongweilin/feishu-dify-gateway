@@ -477,6 +477,33 @@ async def test_long_connection_routes_admin_text_only_to_administrative_handoff(
     assert control_plane_calls == []
 
 
+async def test_safe_metadata_dispatch_without_handler_is_noop() -> None:
+    async def handle_text(event_id: str, sender_id: str, text: str) -> None:
+        pass
+
+    connection = FeishuLongConnection(
+        "app-id",
+        "app-secret",
+        handle_text,
+        Metrics(),
+    )
+    metadata = FeishuEventMetadata(
+        event_id="event-no-handler",
+        event_type="im.message.receive_v1",
+        tenant_key="tenant-1",
+        message_id="om-no-handler",
+        root_id=None,
+        parent_id=None,
+        thread_id=None,
+        sender_open_id="ou-1",
+        create_time="1893456000000",
+        verification_token=None,
+        message_type="text",
+    )
+
+    await connection._safe_metadata_dispatch(metadata)
+
+
 async def test_long_connection_routes_ordinary_text_only_to_control_plane(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

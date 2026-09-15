@@ -531,9 +531,11 @@ class FeishuLongConnection:
         self._thread.start()
 
     async def _safe_metadata_dispatch(self, metadata: FeishuEventMetadata) -> None:
+        handler = self._metadata_handler
+        if handler is None:
+            return
         try:
-            assert self._metadata_handler is not None
-            await self._metadata_handler(metadata)
+            await handler(metadata)
         except Exception:
             logger.error(
                 "feishu administrative metadata handoff failed",
